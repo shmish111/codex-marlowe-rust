@@ -41,7 +41,15 @@ describe('api client', () => {
         error: {
           subcode: 'INVALID_CONTRACT',
           message: 'Invalid contract',
-          diagnostics: [{ message: 'Bad token at line 4' }]
+          diagnostics: [
+            {
+              message: 'Bad token at line 4',
+              line: 4,
+              column: 12,
+              end_line: 4,
+              end_column: 20
+            }
+          ]
         }
       })
     });
@@ -50,7 +58,18 @@ describe('api client', () => {
 
     const result = await validateContract('bad-contract');
     expect(result.valid).toBe(false);
-    expect(result.diagnostics).toEqual(['Bad token at line 4']);
+    expect(result.diagnostics).toEqual([
+      {
+        code: undefined,
+        subcode: undefined,
+        path: undefined,
+        line: 4,
+        column: 12,
+        endLine: 4,
+        endColumn: 20,
+        message: 'Bad token at line 4'
+      }
+    ]);
   });
 
   it('extracts choice/deposit/notify inputs from preview', async () => {

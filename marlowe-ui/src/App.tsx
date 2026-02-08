@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { simulateContract, simulateStep, validateContract } from './api/client';
-import type { SimulationInput, SimulationResponse } from './api/client';
+import type { SimulationInput, SimulationResponse, ValidationDiagnostic } from './api/client';
+import type * as Monaco from 'monaco-editor';
 import './styles.css';
 
 const OPEN_API_URL = 'http://127.0.0.1:3000/openapi.json';
@@ -18,7 +19,7 @@ type Example = {
 type ValidationState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'success'; valid: boolean; diagnostics: string[] }
+  | { status: 'success'; valid: boolean; diagnostics: ValidationDiagnostic[] }
   | { status: 'error'; message: string };
 
 type SimulationState =
@@ -43,6 +44,8 @@ export default function App() {
   const [selectedInputKey, setSelectedInputKey] = useState<string>('');
   const [choiceValue, setChoiceValue] = useState<string>('0');
   const validationRunIdRef = useRef(0);
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof Monaco | null>(null);
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
 
@@ -237,6 +240,131 @@ export default function App() {
     };
   }, [code, hasUserEdited, runValidation]);
 
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) {
+      return;
+    }
+
+    const model = editor.getModel();
+    if (!model) {
+      return;
+    }
+
+    if (validationState.status !== 'success' || validationState.valid) {
+      monaco.editor.setModelMarkers(model, 'validation', []);
+      return;
+    }
+
+    const lines = code.split('\n');
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const findTokenPosition = (token: string) => {
+      if (!token) {
+        return null;
+      }
+
+      const pattern = new RegExp(`\\b${escapeRegExp(token)}\\b`);
+      for (let index = 0; index < lines.length; index += 1) {
+        const lineText = lines[index];
+        const match = pattern.exec(lineText);
+        if (match && typeof match.index === 'number') {
+          const startColumn = match.index + 1;
+          return {
+            line: index + 1,
+            column: startColumn,
+            endLine: index + 1,
+            endColumn: startColumn + token.length
+          };
+        }
+      }
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const lineText = lines[index];
+        const charIndex = lineText.indexOf(token);
+        if (charIndex >= 0) {
+          const startColumn = charIndex + 1;
+          return {
+            line: index + 1,
+            column: startColumn,
+            endLine: index + 1,
+            endColumn: startColumn + token.length
+          };
+        }
+      }
+
+      return null;
+    };
+
+    const markers: Monaco.editor.IMarkerData[] =
+      validationState.diagnostics.length > 0
+        ? validationState.diagnostics.map((diagnostic) => {
+            const fromMessage = diagnostic.message.match(/line\s+(\d+)(?:\D+column\s+(\d+))?/i);
+
+            let line = diagnostic.line ?? Number(fromMessage?.[1] ?? 0);
+            let column = diagnostic.column ?? Number(fromMessage?.[2] ?? 0);
+            let endLine = diagnostic.endLine ?? line;
+            let endColumn = diagnostic.endColumn ?? column;
+
+            if (!line) {
+              const messageTokens = Array.from(
+                diagnostic.message.matchAll(/['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/g)
+              ).map((match) => match[1]);
+
+              const pathTokens = diagnostic.path
+                ? (diagnostic.path.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter(
+                    (token) => token !== '$'
+                  )
+                : [];
+
+              const tokenCandidates = Array.from(
+                new Set([...messageTokens, ...pathTokens.reverse()])
+              );
+
+              for (const token of tokenCandidates) {
+                const tokenPosition = findTokenPosition(token);
+                if (tokenPosition) {
+                  line = tokenPosition.line;
+                  column = tokenPosition.column;
+                  endLine = tokenPosition.endLine;
+                  endColumn = tokenPosition.endColumn;
+                  break;
+                }
+              }
+            }
+
+            const safeLine = line > 0 ? line : 1;
+            const safeColumn = column > 0 ? column : 1;
+            const safeEndLine = endLine && endLine > 0 ? endLine : safeLine;
+            const endLineText = lines[safeEndLine - 1] ?? '';
+            const safeEndColumn =
+              endColumn && endColumn > 0
+                ? endColumn
+                : Math.max(safeColumn + 1, endLineText.length + 1);
+
+            return {
+              severity: monaco.MarkerSeverity.Error,
+              message: diagnostic.message,
+              startLineNumber: safeLine,
+              startColumn: safeColumn,
+              endLineNumber: safeEndLine,
+              endColumn: Math.max(safeEndColumn, safeColumn + 1)
+            };
+          })
+        : [
+            {
+              severity: monaco.MarkerSeverity.Error,
+              message: 'Invalid contract',
+              startLineNumber: 1,
+              startColumn: 1,
+              endLineNumber: 1,
+              endColumn: 2
+            }
+          ];
+
+    monaco.editor.setModelMarkers(model, 'validation', markers);
+  }, [validationState, code]);
+
   const renderInputLabel = (input: SimulationInput): string => {
     if (input.kind === 'choice') {
       const bounds = input.bounds.map((bound) => `${bound.from}..${bound.to}`).join(', ');
@@ -290,6 +418,10 @@ export default function App() {
                 language={activeLanguage}
                 theme="vs-dark"
                 value={code}
+                onMount={(editor, monaco) => {
+                  editorRef.current = editor;
+                  monacoRef.current = monaco;
+                }}
                 onChange={(value) => {
                   setCode(value ?? '');
                   setHasUserEdited(true);
@@ -334,7 +466,7 @@ export default function App() {
                 ) : (
                   <ul className="panel-list">
                     {validationState.diagnostics.map((diagnostic, index) => (
-                      <li key={`${diagnostic}-${index}`}>{diagnostic}</li>
+                      <li key={`${diagnostic.message}-${index}`}>{diagnostic.message}</li>
                     ))}
                   </ul>
                 )}

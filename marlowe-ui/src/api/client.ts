@@ -1,6 +1,17 @@
+export type ValidationDiagnostic = {
+  message: string;
+  path?: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
+  code?: string;
+  subcode?: string;
+};
+
 export type ValidationResponse = {
   valid: boolean;
-  diagnostics: string[];
+  diagnostics: ValidationDiagnostic[];
 };
 
 export type ChoiceBound = {
@@ -52,7 +63,15 @@ export type SimulationStepResponse = {
 };
 
 type ApiDiagnostic = {
+  code?: string;
+  subcode?: string;
+  path?: string;
   message: string;
+  line?: number;
+  column?: number;
+  end_line?: number;
+  end_column?: number;
+  details?: Record<string, unknown>;
 };
 
 type ApiSimulateState = {
@@ -165,6 +184,34 @@ function mapPreviewErrorToMessages(error: ApiSimulatePreviewResponse['error']): 
   return error.diagnostics?.map((item) => item.message) ?? [error.message];
 }
 
+function mapPreviewErrorToDiagnostics(
+  error: ApiSimulatePreviewResponse['error']
+): ValidationDiagnostic[] {
+  if (!error) {
+    return [];
+  }
+
+  if (error.diagnostics && error.diagnostics.length > 0) {
+    return error.diagnostics.map((item) => ({
+      message: item.message,
+      path: item.path,
+      line: item.line,
+      column: item.column,
+      endLine: item.end_line,
+      endColumn: item.end_column,
+      code: item.code,
+      subcode: item.subcode
+    }));
+  }
+
+  return [
+    {
+      message: error.message,
+      subcode: error.subcode
+    }
+  ];
+}
+
 function mapPreviewInputs(inputs: ApiPreviewInput[]): SimulationInput[] {
   const mapped: SimulationInput[] = [];
 
@@ -219,7 +266,7 @@ export async function validateContract(code: string): Promise<ValidationResponse
   if (response.data?.error) {
     return {
       valid: false,
-      diagnostics: mapPreviewErrorToMessages(response.data.error)
+      diagnostics: mapPreviewErrorToDiagnostics(response.data.error)
     };
   }
 
