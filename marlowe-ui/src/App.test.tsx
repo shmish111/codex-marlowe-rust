@@ -187,7 +187,12 @@ describe('App', () => {
         result: 'ok',
         success: {
           contract_yaml: 'v1',
-          state: { min_time: '10' },
+          state: {
+            min_time: '10',
+            accounts: [],
+            choices: [],
+            bound_values: {}
+          },
           inputs: [
             {
               choice: {
@@ -206,7 +211,20 @@ describe('App', () => {
         result: 'ok',
         success: {
           contract_yaml: 'v2',
-          state: { min_time: '11' },
+          state: {
+            min_time: '11',
+            accounts: [
+              {
+                owner: { Role: 'Alice' },
+                token: { Token: { currency_symbol: '', token_name: '' } },
+                amount: '100'
+              }
+            ],
+            choices: [
+              { id: { ChoiceId: { name: 'FirstChoice', party: { Role: 'Alice' } } }, value: '3' }
+            ],
+            bound_values: { deadline: '100' }
+          },
           warnings: [],
           trace: [
             {
@@ -254,6 +272,7 @@ describe('App', () => {
 
     const select = await screen.findByLabelText('Available input');
     expect(select).toHaveTextContent('FirstChoice');
+    expect(await screen.findByText('Min time: 10')).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText('Choice value'));
     await user.type(screen.getByLabelText('Choice value'), '3');
@@ -264,5 +283,7 @@ describe('App', () => {
     ).toBeInTheDocument();
     expect(await screen.findByLabelText('Available input')).toHaveTextContent('SecondChoice');
     expect(await screen.findByText('Input applied: choice FirstChoice=3')).toBeInTheDocument();
+    expect(await screen.findByText('Min time: 11')).toBeInTheDocument();
+    expect(await screen.findByText('Min time changed: 10 -> 11')).toBeInTheDocument();
   });
 });

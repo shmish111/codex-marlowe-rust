@@ -48,6 +48,72 @@ type UnresolvedItem = {
   expectedType?: string;
 };
 
+function stableStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeStateDiff(
+  previousState: Record<string, unknown> | null,
+  nextState: Record<string, unknown> | null
+): string[] {
+  if (!previousState && !nextState) {
+    return [];
+  }
+
+  if (!previousState && nextState) {
+    return ['Initialized simulation state'];
+  }
+
+  if (!nextState) {
+    return ['State cleared'];
+  }
+
+  const changes: string[] = [];
+  const previousMinTime =
+    typeof previousState?.min_time === 'string' ? previousState.min_time : '0';
+  const nextMinTime = typeof nextState.min_time === 'string' ? nextState.min_time : '0';
+  if (previousMinTime !== nextMinTime) {
+    changes.push(`Min time changed: ${previousMinTime} -> ${nextMinTime}`);
+  }
+
+  const previousAccounts = Array.isArray(previousState?.accounts) ? previousState.accounts : [];
+  const nextAccounts = Array.isArray(nextState.accounts) ? nextState.accounts : [];
+  if (stableStringify(previousAccounts) !== stableStringify(nextAccounts)) {
+    changes.push(`Accounts changed (${nextAccounts.length} entries)`);
+  }
+
+  const previousChoices = Array.isArray(previousState?.choices) ? previousState.choices : [];
+  const nextChoices = Array.isArray(nextState.choices) ? nextState.choices : [];
+  if (stableStringify(previousChoices) !== stableStringify(nextChoices)) {
+    changes.push(`Choices changed (${nextChoices.length} entries)`);
+  }
+
+  const previousBoundValues =
+    previousState?.bound_values && typeof previousState.bound_values === 'object'
+      ? (previousState.bound_values as Record<string, unknown>)
+      : {};
+  const nextBoundValues =
+    nextState.bound_values && typeof nextState.bound_values === 'object'
+      ? (nextState.bound_values as Record<string, unknown>)
+      : {};
+  if (stableStringify(previousBoundValues) !== stableStringify(nextBoundValues)) {
+    changes.push(`Bound values changed (${Object.keys(nextBoundValues).length} entries)`);
+  }
+
+  return changes.length > 0 ? changes : ['No state changes'];
+}
+
+function renderStateValue(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return stableStringify(value);
+}
+
 function getDetailString(diagnostic: ValidationDiagnostic, key: string): string | undefined {
   const value = diagnostic.details?.[key];
   return typeof value === 'string' ? value : undefined;
@@ -129,6 +195,8 @@ export default function App() {
   const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
   const [simulationTrace, setSimulationTrace] = useState<SimulationTraceEvent[]>([]);
+  const [, setStateSnapshots] = useState<Array<Record<string, unknown> | null>>([]);
+  const [stateChanges, setStateChanges] = useState<string[]>([]);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
   const [selectedInputKey, setSelectedInputKey] = useState<string>('');
@@ -217,6 +285,13 @@ export default function App() {
   const runPreview = async (yaml: string, state: Record<string, unknown> | null = null) => {
     const result = await simulateContract(yaml, state);
     setSimulationState({ status: 'success', result });
+    setStateSnapshots((previousSnapshots) => {
+      const previousState =
+        previousSnapshots.length > 0 ? previousSnapshots[previousSnapshots.length - 1] : null;
+      const nextState = result.context.state ?? null;
+      setStateChanges(summarizeStateDiff(previousState, nextState));
+      return [...previousSnapshots, nextState];
+    });
 
     if (result.inputs[0]) {
       setSelectedInputKey(JSON.stringify(result.inputs[0]));
@@ -283,6 +358,8 @@ export default function App() {
     setSimulationRunning(true);
     setSimulationState({ status: 'loading' });
     setSimulationTrace([]);
+    setStateSnapshots([]);
+    setStateChanges([]);
     try {
       await runPreview(code);
     } catch (error) {
@@ -299,6 +376,23 @@ export default function App() {
           (input) => JSON.stringify(input) === selectedInputKey
         ) ?? null)
       : null;
+
+  const currentSimState =
+    simulationState.status === 'success' ? simulationState.result.context.state : null;
+  const stateAccounts =
+    currentSimState && Array.isArray(currentSimState.accounts) ? currentSimState.accounts : [];
+  const stateChoices =
+    currentSimState && Array.isArray(currentSimState.choices) ? currentSimState.choices : [];
+  const stateBoundValues =
+    currentSimState &&
+    currentSimState.bound_values &&
+    typeof currentSimState.bound_values === 'object'
+      ? (currentSimState.bound_values as Record<string, unknown>)
+      : {};
+  const stateMinTime =
+    currentSimState && typeof currentSimState.min_time === 'string'
+      ? currentSimState.min_time
+      : '0';
 
   const unresolvedItems = useMemo<UnresolvedItem[]>(() => {
     if (validationState.status !== 'success' || validationState.valid) {
@@ -828,6 +922,61 @@ export default function App() {
                             <span className="panel-hint">Warning: {event.warningCode}</span>
                           ) : null}
                         </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                <div className="panel-block">
+                  <p className="panel-result">State</p>
+                  <ul className="panel-list">
+                    <li>Min time: {stateMinTime}</li>
+                    <li>Accounts: {stateAccounts.length}</li>
+                    <li>Choices: {stateChoices.length}</li>
+                    <li>Bound values: {Object.keys(stateBoundValues).length}</li>
+                  </ul>
+                  {stateAccounts.length > 0 ? (
+                    <div className="state-detail">
+                      <p className="panel-result">Accounts detail</p>
+                      <ul className="panel-list">
+                        {stateAccounts.map((account, index) => (
+                          <li key={`account-${index}`}>
+                            <code>{renderStateValue(account)}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {stateChoices.length > 0 ? (
+                    <div className="state-detail">
+                      <p className="panel-result">Choices detail</p>
+                      <ul className="panel-list">
+                        {stateChoices.map((choice, index) => (
+                          <li key={`choice-${index}`}>
+                            <code>{renderStateValue(choice)}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {Object.keys(stateBoundValues).length > 0 ? (
+                    <div className="state-detail">
+                      <p className="panel-result">Bound values detail</p>
+                      <ul className="panel-list">
+                        {Object.entries(stateBoundValues).map(([key, value]) => (
+                          <li key={key}>
+                            <code>{key}</code>: <code>{renderStateValue(value)}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
+                {stateChanges.length > 0 ? (
+                  <div className="panel-block">
+                    <p className="panel-result">State changes</p>
+                    <ul className="panel-list">
+                      {stateChanges.map((change, index) => (
+                        <li key={`state-change-${index}`}>{change}</li>
                       ))}
                     </ul>
                   </div>
