@@ -184,6 +184,7 @@ export default function App() {
           onClick={() => {
             setSelectedExample(example);
             setCode(example.code);
+            setHasUserEdited(false);
             setModalOpen(false);
           }}
         >
@@ -327,6 +328,11 @@ export default function App() {
     return { kind: 'invalid' as const, label: 'Invalid contract' };
   }, [validationState]);
 
+  const canRunSimulation =
+    validationState.status === 'success' &&
+    validationState.valid &&
+    validationState.diagnostics.length === 0;
+
   const handleApplyInput = async () => {
     if (simulationState.status !== 'success' || !selectedSimulationInput) {
       return;
@@ -362,6 +368,14 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [code, hasUserEdited, runValidation]);
+
+  useEffect(() => {
+    if (hasUserEdited || !code.trim() || apiStatus !== 'connected') {
+      return;
+    }
+
+    void runValidation(code);
+  }, [code, hasUserEdited, apiStatus, runValidation]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -643,14 +657,18 @@ export default function App() {
 
           <section className="tool-section">
             <h2>Simulation</h2>
-            <button
-              className="panel-action"
-              type="button"
-              onClick={handleSimulate}
-              disabled={apiStatus !== 'connected' || isSimulationRunning}
-            >
-              Run simulation
-            </button>
+            {canRunSimulation ? (
+              <button
+                className="panel-action"
+                type="button"
+                onClick={handleSimulate}
+                disabled={apiStatus !== 'connected' || isSimulationRunning}
+              >
+                Run simulation
+              </button>
+            ) : (
+              <p className="panel-result">Fix validation issues to enable simulation.</p>
+            )}
             {simulationState.status === 'idle' ? (
               <p className="panel-result">No simulation run yet.</p>
             ) : null}

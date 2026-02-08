@@ -44,6 +44,18 @@ describe('App', () => {
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
     });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'test',
+          state: { min_time: '0' },
+          inputs: []
+        },
+        error: null
+      })
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -70,7 +82,8 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText(/api connection failed: http 503/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /run simulation/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /run simulation/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Fix validation issues to enable simulation.')).toBeInTheDocument();
   });
 
   it('auto-validates on editor changes and shows diagnostics', async () => {
@@ -79,6 +92,18 @@ describe('App', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'test',
+          state: { min_time: '0' },
+          inputs: []
+        },
+        error: null
+      })
     });
     fetchMock.mockResolvedValueOnce({
       ok: false,
@@ -110,6 +135,18 @@ describe('App', () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'test',
+          state: { min_time: '0' },
+          inputs: []
+        },
+        error: null
+      })
     });
     fetchMock.mockResolvedValueOnce({
       ok: true,
