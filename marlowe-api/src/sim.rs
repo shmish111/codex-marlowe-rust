@@ -96,6 +96,30 @@ pub enum TransactionWarning {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceReduceRule {
+    CloseRefund,
+    Pay,
+    IfBranch,
+    WhenTimeout,
+    Let,
+    Assert,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceStep {
+    Reduced {
+        rule: TraceReduceRule,
+        warning: Option<TransactionWarning>,
+        payment: Option<Payment>,
+    },
+    InputApplied {
+        input_index: usize,
+        input: SimInput,
+        warning: Option<TransactionWarning>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimError {
     NotReadyToRun,
     InvalidInterval {
@@ -120,6 +144,7 @@ pub struct SimTransactionSuccess {
     pub payments: Vec<Payment>,
     pub state: SimState,
     pub contract: Contract,
+    pub trace: Vec<TraceStep>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +188,15 @@ pub fn simulate_transaction(
     state: &SimState,
     transaction: &SimTransaction,
 ) -> SimTransactionResult {
+    simulate_transaction_with_trace(contract, state, transaction, false)
+}
+
+pub fn simulate_transaction_with_trace(
+    contract: &Contract,
+    state: &SimState,
+    transaction: &SimTransaction,
+    include_trace: bool,
+) -> SimTransactionResult {
     let check = type_check(contract, &TypeCheckContext::default());
     if !check.errors.is_empty() || !check.holes.is_empty() || !check.params.is_empty() {
         return SimTransactionResult::Error(SimError::NotReadyToRun);
@@ -177,8 +211,13 @@ pub fn simulate_transaction(
         Err(err) => return SimTransactionResult::Error(err),
     };
 
-    let applied = match apply_all_inputs(&environment, &fixed_state, contract, &transaction.inputs)
-    {
+    let applied = match apply_all_inputs(
+        &environment,
+        &fixed_state,
+        contract,
+        &transaction.inputs,
+        include_trace,
+    ) {
         Ok(result) => result,
         Err(err) => return SimTransactionResult::Error(err),
     };
@@ -193,6 +232,7 @@ pub fn simulate_transaction(
         payments: applied.payments,
         state: applied.state,
         contract: applied.contract,
+        trace: applied.trace,
     }))
 }
 
@@ -208,7 +248,7 @@ pub fn preview_inputs(
     }
 
     let (environment, fixed_state) = fix_interval(interval_start, interval_end, state)?;
-    let reduced = reduce_until_quiescent(&environment, &fixed_state, contract)?;
+    let reduced = reduce_until_quiescent(&environment, &fixed_state, contract, false)?;
 
     let inputs = match &reduced.contract {
         Contract::When { cases, .. } => cases
@@ -268,6 +308,7 @@ struct ApplyAllResult {
     payments: Vec<Payment>,
     state: SimState,
     contract: Contract,
+    trace: Vec<TraceStep>,
 }
 
 fn apply_all_inputs(
@@ -275,17 +316,25 @@ fn apply_all_inputs(
     state: &SimState,
     contract: &Contract,
     inputs: &[SimInput],
+    include_trace: bool,
 ) -> Result<ApplyAllResult, SimError> {
     let mut current_state = state.clone();
     let mut current_contract = contract.clone();
     let mut warnings = Vec::new();
     let mut payments = Vec::new();
     let mut reduced_or_applied = false;
+    let mut trace = Vec::new();
 
     for (index, input) in inputs.iter().enumerate() {
-        let reduced = reduce_until_quiescent(environment, &current_state, &current_contract)?;
+        let reduced = reduce_until_quiescent(
+            environment,
+            &current_state,
+            &current_contract,
+            include_trace,
+        )?;
         warnings.extend(reduced.warnings);
         payments.extend(reduced.payments);
+        trace.extend(reduced.trace);
         current_state = reduced.state;
         current_contract = reduced.contract;
 
@@ -294,16 +343,35 @@ fn apply_all_inputs(
 
         reduced_or_applied = true;
         if let Some(warning) = applied.warning {
-            warnings.push(warning);
+            warnings.push(warning.clone());
+            if include_trace {
+                trace.push(TraceStep::InputApplied {
+                    input_index: index,
+                    input: input.clone(),
+                    warning: Some(warning),
+                });
+            }
+        } else if include_trace {
+            trace.push(TraceStep::InputApplied {
+                input_index: index,
+                input: input.clone(),
+                warning: None,
+            });
         }
         current_state = applied.state;
         current_contract = applied.contract;
     }
 
-    let reduced = reduce_until_quiescent(environment, &current_state, &current_contract)?;
+    let reduced = reduce_until_quiescent(
+        environment,
+        &current_state,
+        &current_contract,
+        include_trace,
+    )?;
     reduced_or_applied |= reduced.reduced;
     warnings.extend(reduced.warnings);
     payments.extend(reduced.payments);
+    trace.extend(reduced.trace);
 
     Ok(ApplyAllResult {
         reduced: reduced_or_applied,
@@ -311,6 +379,7 @@ fn apply_all_inputs(
         payments,
         state: reduced.state,
         contract: reduced.contract,
+        trace,
     })
 }
 
@@ -320,18 +389,21 @@ struct ReduceUntilResult {
     payments: Vec<Payment>,
     state: SimState,
     contract: Contract,
+    trace: Vec<TraceStep>,
 }
 
 fn reduce_until_quiescent(
     environment: &Environment,
     state: &SimState,
     contract: &Contract,
+    include_trace: bool,
 ) -> Result<ReduceUntilResult, SimError> {
     let mut current_state = state.clone();
     let mut current_contract = contract.clone();
     let mut warnings = Vec::new();
     let mut payments = Vec::new();
     let mut any_reduced = false;
+    let mut trace = Vec::new();
 
     loop {
         match reduce_step(environment, &current_state, &current_contract)? {
@@ -342,15 +414,23 @@ fn reduce_until_quiescent(
                     payments,
                     state: current_state,
                     contract: current_contract,
+                    trace,
                 });
             }
             ReduceStep::Reduced(step) => {
                 any_reduced = true;
-                if let Some(warning) = step.warning {
-                    warnings.push(warning);
+                if let Some(warning) = &step.warning {
+                    warnings.push(warning.clone());
                 }
-                if let Some(payment) = step.payment {
-                    payments.push(payment);
+                if let Some(payment) = &step.payment {
+                    payments.push(payment.clone());
+                }
+                if include_trace {
+                    trace.push(TraceStep::Reduced {
+                        rule: step.rule.clone(),
+                        warning: step.warning.clone(),
+                        payment: step.payment.clone(),
+                    });
                 }
                 current_state = step.state;
                 current_contract = step.contract;
@@ -365,6 +445,7 @@ enum ReduceStep {
 }
 
 struct ReducedStepData {
+    rule: TraceReduceRule,
     warning: Option<TransactionWarning>,
     payment: Option<Payment>,
     state: SimState,
@@ -389,6 +470,7 @@ fn reduce_step(
             let amount_to_pay = eval_value(state, environment, amount);
             if amount_to_pay <= BigInt::zero() {
                 return Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
+                    rule: TraceReduceRule::Pay,
                     warning: Some(TransactionWarning::NonPositivePay {
                         from: from.clone(),
                         to: to.clone(),
@@ -429,6 +511,7 @@ fn reduce_step(
             };
 
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
+                rule: TraceReduceRule::Pay,
                 warning,
                 payment: Some(payment),
                 state: new_state,
@@ -442,6 +525,7 @@ fn reduce_step(
                 (**else_).clone()
             };
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
+                rule: TraceReduceRule::IfBranch,
                 warning: None,
                 payment: None,
                 state: state.clone(),
@@ -458,6 +542,7 @@ fn reduce_step(
                 Ok(ReduceStep::NotReduced)
             } else if timeout <= environment.start {
                 Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
+                    rule: TraceReduceRule::WhenTimeout,
                     warning: None,
                     payment: None,
                     state: state.clone(),
@@ -480,6 +565,7 @@ fn reduce_step(
                 });
 
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
+                rule: TraceReduceRule::Let,
                 warning,
                 payment: None,
                 state: new_state,
@@ -493,6 +579,7 @@ fn reduce_step(
                 Some(TransactionWarning::AssertionFailed)
             };
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
+                rule: TraceReduceRule::Assert,
                 warning,
                 payment: None,
                 state: state.clone(),
@@ -525,6 +612,7 @@ fn refund_one(state: &SimState) -> ReduceStep {
     };
 
     ReduceStep::Reduced(Box::new(ReducedStepData {
+        rule: TraceReduceRule::CloseRefund,
         warning: None,
         payment: Some(payment),
         state: new_state,

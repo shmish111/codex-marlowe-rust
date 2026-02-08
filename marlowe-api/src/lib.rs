@@ -15,9 +15,9 @@ pub mod typecheck;
 pub use parser::{parse_contract_yaml, ParseError};
 pub use serializer::{contract_to_yaml, contract_to_yaml_string};
 pub use sim::{
-    preview_inputs, simulate_transaction, AccountId, Payment, PreviewInput, PreviewResult,
-    SimError, SimInput, SimState, SimTransaction, SimTransactionResult, SimTransactionSuccess,
-    TransactionWarning,
+    preview_inputs, simulate_transaction, simulate_transaction_with_trace, AccountId, Payment,
+    PreviewInput, PreviewResult, SimError, SimInput, SimState, SimTransaction,
+    SimTransactionResult, SimTransactionSuccess, TraceReduceRule, TraceStep, TransactionWarning,
 };
 pub use typecheck::{
     type_check, ChoiceRef, Diagnostic, PartyRef, TokenRef, TypeCheckContext, TypeCheckResult,

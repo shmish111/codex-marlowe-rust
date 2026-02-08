@@ -716,6 +716,9 @@
           "state": {
             "$ref": "#/components/schemas/SimulateStateRequest"
           },
+          "trace": {
+            "type": "boolean"
+          },
           "transaction": {
             "$ref": "#/components/schemas/SimulateTxRequest"
           }
@@ -772,6 +775,15 @@
           },
           "state": {
             "$ref": "#/components/schemas/StateResponse"
+          },
+          "trace": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/TraceEventResponse"
+            }
           },
           "warnings": {
             "type": "array",
@@ -872,6 +884,151 @@
                     "type": "string"
                   }
                 }
+              }
+            }
+          }
+        ]
+      },
+      "TraceEventResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "rule",
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "Reduced"
+                ]
+              },
+              "payment": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PaymentResponse"
+                  }
+                ]
+              },
+              "rule": {
+                "type": "string"
+              },
+              "warning": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WarningResponse"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "input_index",
+              "input",
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "InputApplied"
+                ]
+              },
+              "input": {
+                "$ref": "#/components/schemas/TraceInputResponse"
+              },
+              "input_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "warning": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/WarningResponse"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "TraceInputResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "into",
+              "by",
+              "token",
+              "amount",
+              "kind"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "by": {
+                "$ref": "#/components/schemas/Party"
+              },
+              "into": {
+                "$ref": "#/components/schemas/Party"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "deposit"
+                ]
+              },
+              "token": {
+                "$ref": "#/components/schemas/Token"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "value",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/components/schemas/ChoiceId"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "choice"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "notify"
+                ]
               }
             }
           }

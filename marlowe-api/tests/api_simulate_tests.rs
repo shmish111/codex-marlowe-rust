@@ -114,6 +114,62 @@ When:
             .len(),
         0
     );
+    assert!(json["success"].get("trace").is_none());
+}
+
+#[tokio::test]
+async fn simulate_step_trace_mode_returns_semantic_events() {
+    let app = build_router();
+    let contract = r#"
+Pay:
+  from: { Role: "Alice" }
+  to_party: { Role: "Bob" }
+  token: { Token: { currency_symbol: "", token_name: "" } }
+  amount: { Constant: 10 }
+  then: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "trace": true,
+      "state": {
+        "accounts": [
+          {
+            "owner": {"Role": "Alice"},
+            "token": {"Token": {"currency_symbol": "", "token_name": ""}},
+            "amount": "3"
+          }
+        ]
+      },
+      "transaction": {
+        "interval_start": "0",
+        "interval_end": "10",
+        "inputs": []
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    let trace = json["success"]["trace"].as_array().expect("trace array");
+    assert!(!trace.is_empty());
+    assert_eq!(trace[0]["code"], "Reduced");
+    assert_eq!(trace[0]["rule"], "Pay");
+    assert_eq!(trace[0]["warning"]["code"], "PartialPay");
+    assert_eq!(trace[0]["warning"]["expected"], "10");
+    assert_eq!(trace[0]["warning"]["paid"], "3");
+    assert_eq!(trace[0]["payment"]["amount"], "3");
 }
 
 #[tokio::test]

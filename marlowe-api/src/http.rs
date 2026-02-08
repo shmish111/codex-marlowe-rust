@@ -14,8 +14,9 @@ use crate::{
     ast::{ChoiceId, Party, PayeeTarget, Token},
     contract_to_yaml_string, parse_contract_yaml,
     sim::{
-        preview_inputs, simulate_transaction, AccountId, Payment, PreviewInput, SimError, SimInput,
-        SimState, SimTransaction, SimTransactionResult, TransactionWarning,
+        preview_inputs, simulate_transaction_with_trace, AccountId, Payment, PreviewInput,
+        SimError, SimInput, SimState, SimTransaction, SimTransactionResult, TraceReduceRule,
+        TraceStep, TransactionWarning,
     },
     type_check, TypeCheckContext,
 };
@@ -65,6 +66,8 @@ pub struct SimulateStepRequest {
     #[serde(default)]
     pub state: SimulateStateRequest,
     pub transaction: SimulateTxRequest,
+    #[serde(default)]
+    pub trace: bool,
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
@@ -175,6 +178,8 @@ pub struct SimulateSuccessResponse {
     pub payments: Vec<PaymentResponse>,
     pub state: StateResponse,
     pub contract_yaml: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace: Option<Vec<TraceEventResponse>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -227,6 +232,40 @@ pub enum WarningResponse {
         new: String,
     },
     AssertionFailed {},
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(tag = "code")]
+pub enum TraceEventResponse {
+    Reduced {
+        rule: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        warning: Option<WarningResponse>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        payment: Option<PaymentResponse>,
+    },
+    InputApplied {
+        input_index: usize,
+        input: TraceInputResponse,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        warning: Option<WarningResponse>,
+    },
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum TraceInputResponse {
+    Deposit {
+        into: Party,
+        by: Party,
+        token: Token,
+        amount: String,
+    },
+    Choice {
+        id: ChoiceId,
+        value: String,
+    },
+    Notify,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -457,11 +496,17 @@ pub async fn simulate_step_handler(
         }
     };
 
-    match simulate_transaction(&contract, &state, &transaction) {
+    match simulate_transaction_with_trace(&contract, &state, &transaction, request.trace) {
         SimTransactionResult::Success(success) => {
             let contract_yaml = match contract_to_yaml_string(&success.contract) {
                 Ok(yaml) => yaml,
                 Err(err) => return internal_error(format!("failed to serialize contract: {err}")),
+            };
+
+            let trace = if request.trace {
+                Some(success.trace.iter().map(trace_step_to_response).collect())
+            } else {
+                None
             };
 
             let response = SimulateStepResponse {
@@ -471,6 +516,7 @@ pub async fn simulate_step_handler(
                     payments: success.payments.iter().map(payment_to_response).collect(),
                     state: state_to_response(&success.state),
                     contract_yaml,
+                    trace,
                 }),
                 error: None,
             };
@@ -747,6 +793,61 @@ fn warning_to_response(warning: &TransactionWarning) -> WarningResponse {
             new: new.to_string(),
         },
         TransactionWarning::AssertionFailed => WarningResponse::AssertionFailed {},
+    }
+}
+
+fn trace_step_to_response(step: &TraceStep) -> TraceEventResponse {
+    match step {
+        TraceStep::Reduced {
+            rule,
+            warning,
+            payment,
+        } => TraceEventResponse::Reduced {
+            rule: trace_rule_name(rule).to_owned(),
+            warning: warning.as_ref().map(warning_to_response),
+            payment: payment.as_ref().map(payment_to_response),
+        },
+        TraceStep::InputApplied {
+            input_index,
+            input,
+            warning,
+        } => TraceEventResponse::InputApplied {
+            input_index: *input_index,
+            input: trace_input_to_response(input),
+            warning: warning.as_ref().map(warning_to_response),
+        },
+    }
+}
+
+fn trace_rule_name(rule: &TraceReduceRule) -> &'static str {
+    match rule {
+        TraceReduceRule::CloseRefund => "CloseRefund",
+        TraceReduceRule::Pay => "Pay",
+        TraceReduceRule::IfBranch => "IfBranch",
+        TraceReduceRule::WhenTimeout => "WhenTimeout",
+        TraceReduceRule::Let => "Let",
+        TraceReduceRule::Assert => "Assert",
+    }
+}
+
+fn trace_input_to_response(input: &SimInput) -> TraceInputResponse {
+    match input {
+        SimInput::Deposit {
+            into,
+            by,
+            token,
+            amount,
+        } => TraceInputResponse::Deposit {
+            into: into.clone(),
+            by: by.clone(),
+            token: token.clone(),
+            amount: amount.to_string(),
+        },
+        SimInput::Choice { id, value } => TraceInputResponse::Choice {
+            id: id.clone(),
+            value: value.to_string(),
+        },
+        SimInput::Notify => TraceInputResponse::Notify,
     }
 }
 

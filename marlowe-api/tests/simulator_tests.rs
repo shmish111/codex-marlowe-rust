@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use marlowe_api::{
-    parse_contract_yaml, simulate_transaction, AccountId, SimError, SimInput, SimState,
-    SimTransaction, SimTransactionResult, TransactionWarning,
+    parse_contract_yaml, simulate_transaction, simulate_transaction_with_trace, AccountId,
+    SimError, SimInput, SimState, SimTransaction, SimTransactionResult, TraceReduceRule, TraceStep,
+    TransactionWarning,
 };
 use num_bigint::BigInt;
 
@@ -430,6 +431,65 @@ Pay:
         SimTransactionResult::Success(success) => {
             assert_eq!(success.payments[0].amount, b(100));
             assert_eq!(success.state.min_time, b(100));
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn trace_mode_records_reduce_and_input_steps() {
+    let contract = parse(
+        r#"
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Alice" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 5 }
+        then:
+          Pay:
+            from: { Role: "Alice" }
+            to_party: { Role: "Bob" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 5 }
+            then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }
+"#,
+    );
+
+    let input = SimInput::Deposit {
+        into: marlowe_api::ast::Party::Role("Alice".to_owned()),
+        by: marlowe_api::ast::Party::Role("Alice".to_owned()),
+        token: marlowe_api::ast::Token::Token {
+            currency_symbol: "".to_owned(),
+            token_name: "".to_owned(),
+        },
+        amount: b(5),
+    };
+
+    let result = simulate_transaction_with_trace(
+        &contract,
+        &SimState::default(),
+        &tx(0, 10, vec![input]),
+        true,
+    );
+    match result {
+        SimTransactionResult::Success(success) => {
+            assert!(success
+                .trace
+                .iter()
+                .any(|step| matches!(step, TraceStep::InputApplied { input_index: 0, .. })));
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::Reduced {
+                    rule: TraceReduceRule::Pay,
+                    ..
+                }
+            )));
         }
         other => panic!("unexpected result: {other:?}"),
     }
