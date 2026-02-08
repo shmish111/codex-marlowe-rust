@@ -8,63 +8,100 @@ export type ChoiceBound = {
   to: string;
 };
 
-export type ChoiceInput = {
+export type SimulationContext = {
+  contractYaml: string;
+  state: Record<string, unknown> | null;
+  minTime: string;
+};
+
+type SimulationChoiceInput = {
+  kind: 'choice';
   id: Record<string, unknown>;
   name: string;
   bounds: ChoiceBound[];
 };
 
+type SimulationDepositInput = {
+  kind: 'deposit';
+  by: Record<string, unknown>;
+  into: Record<string, unknown>;
+  token: Record<string, unknown>;
+  amount: string;
+};
+
+type SimulationNotifyInput = {
+  kind: 'notify';
+};
+
+export type SimulationInput =
+  | SimulationChoiceInput
+  | SimulationDepositInput
+  | SimulationNotifyInput;
+
 export type SimulationResponse = {
   summary: string;
   warnings: string[];
-  choices: ChoiceInput[];
-  contractYaml: string;
+  inputs: SimulationInput[];
+  context: SimulationContext;
 };
 
 export type SimulationStepResponse = {
   summary: string;
   warnings: string[];
-  contractYaml: string;
+  context: SimulationContext;
 };
 
 type ApiDiagnostic = {
-  code: string;
-  subcode: string;
-  path: string;
   message: string;
 };
 
-type ApiChoiceInput = {
-  choice: {
-    id: Record<string, unknown>;
-    bounds: ChoiceBound[];
-  };
-};
+type ApiSimulateState = {
+  min_time?: string;
+} & Record<string, unknown>;
+
+type ApiPreviewInput =
+  | {
+      choice: {
+        id: Record<string, unknown>;
+        bounds: ChoiceBound[];
+      };
+    }
+  | {
+      deposit: {
+        by: Record<string, unknown>;
+        into: Record<string, unknown>;
+        token: Record<string, unknown>;
+        amount: string;
+      };
+    }
+  | {
+      notify: {
+        can_notify: boolean;
+      };
+    };
 
 type ApiSimulatePreviewResponse = {
   result: string;
   error?: {
-    code: string;
     subcode: string;
     message: string;
     diagnostics?: ApiDiagnostic[] | null;
   } | null;
   success?: {
     contract_yaml: string;
-    inputs?: Array<ApiChoiceInput | Record<string, unknown>>;
+    state: ApiSimulateState;
+    inputs?: ApiPreviewInput[];
   } | null;
 };
 
 type ApiSimulateStepResponse = {
   result: string;
   error?: {
-    code: string;
-    subcode: string;
     message: string;
-    diagnostics?: ApiDiagnostic[] | null;
   } | null;
   success?: {
     contract_yaml: string;
+    state: ApiSimulateState;
     warnings: Array<{ code?: string }>;
   } | null;
 };
@@ -108,6 +145,50 @@ function mapPreviewErrorToMessages(error: ApiSimulatePreviewResponse['error']): 
   return error.diagnostics?.map((item) => item.message) ?? [error.message];
 }
 
+function mapPreviewInputs(inputs: ApiPreviewInput[]): SimulationInput[] {
+  const mapped: SimulationInput[] = [];
+
+  for (const input of inputs) {
+    if ('choice' in input) {
+      mapped.push({
+        kind: 'choice',
+        id: input.choice.id,
+        bounds: input.choice.bounds,
+        name: getChoiceName(input.choice.id)
+      });
+      continue;
+    }
+
+    if ('deposit' in input) {
+      mapped.push({
+        kind: 'deposit',
+        by: input.deposit.by,
+        into: input.deposit.into,
+        token: input.deposit.token,
+        amount: input.deposit.amount
+      });
+      continue;
+    }
+
+    if ('notify' in input && input.notify.can_notify) {
+      mapped.push({ kind: 'notify' });
+    }
+  }
+
+  return mapped;
+}
+
+function getMinTime(state: Record<string, unknown> | null | undefined): string {
+  if (!state) {
+    return '0';
+  }
+  const value = state.min_time;
+  if (typeof value === 'string') {
+    return value;
+  }
+  return '0';
+}
+
 export async function validateContract(code: string): Promise<ValidationResponse> {
   const response = await postJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
     contract_yaml: code,
@@ -128,11 +209,16 @@ export async function validateContract(code: string): Promise<ValidationResponse
   };
 }
 
-export async function simulateContract(code: string): Promise<SimulationResponse> {
+export async function simulateContract(
+  contractYaml: string,
+  state: Record<string, unknown> | null = null
+): Promise<SimulationResponse> {
+  const minTime = getMinTime(state);
   const response = await postJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
-    contract_yaml: code,
-    interval_start: '0',
-    interval_end: '0'
+    contract_yaml: contractYaml,
+    interval_start: minTime,
+    interval_end: minTime,
+    state: state ?? undefined
   });
 
   if (response.error) {
@@ -140,52 +226,63 @@ export async function simulateContract(code: string): Promise<SimulationResponse
     return {
       summary: `Preview failed (${response.error.subcode})`,
       warnings,
-      choices: [],
-      contractYaml: code
+      inputs: [],
+      context: {
+        contractYaml,
+        state,
+        minTime
+      }
     };
   }
 
-  const inputs = response.success?.inputs ?? [];
-  const choices: ChoiceInput[] = [];
-
-  for (const input of inputs) {
-    if ('choice' in input) {
-      const choice = input.choice as ApiChoiceInput['choice'];
-      choices.push({
-        id: choice.id,
-        bounds: choice.bounds,
-        name: getChoiceName(choice.id)
-      });
-    }
-  }
-
-  const inputCount = inputs.length;
+  const nextState = response.success?.state ?? state;
+  const nextInputs = mapPreviewInputs(response.success?.inputs ?? []);
   return {
-    summary: `Preview succeeded with ${inputCount} available input(s)`,
+    summary: `Preview succeeded with ${nextInputs.length} available input(s)`,
     warnings: [],
-    choices,
-    contractYaml: response.success?.contract_yaml ?? code
+    inputs: nextInputs,
+    context: {
+      contractYaml: response.success?.contract_yaml ?? contractYaml,
+      state: nextState,
+      minTime: getMinTime(nextState)
+    }
   };
 }
 
-export async function simulateChoiceStep(
-  contractYaml: string,
-  choiceId: Record<string, unknown>,
-  value: string
+export async function simulateStep(
+  context: SimulationContext,
+  input: SimulationInput,
+  choiceValue = '0'
 ): Promise<SimulationStepResponse> {
+  let inputPayload: Record<string, unknown> | string;
+
+  if (input.kind === 'choice') {
+    inputPayload = {
+      choice: {
+        id: input.id,
+        value: choiceValue
+      }
+    };
+  } else if (input.kind === 'deposit') {
+    inputPayload = {
+      deposit: {
+        by: input.by,
+        into: input.into,
+        token: input.token,
+        amount: input.amount
+      }
+    };
+  } else {
+    inputPayload = 'notify';
+  }
+
   const response = await postJson<ApiSimulateStepResponse>('/api/simulate/step', {
-    contract_yaml: contractYaml,
+    contract_yaml: context.contractYaml,
+    state: context.state ?? undefined,
     transaction: {
-      interval_start: '0',
-      interval_end: '0',
-      inputs: [
-        {
-          choice: {
-            id: choiceId,
-            value
-          }
-        }
-      ]
+      interval_start: context.minTime,
+      interval_end: context.minTime,
+      inputs: [inputPayload]
     }
   });
 
@@ -195,9 +292,14 @@ export async function simulateChoiceStep(
 
   const warningCodes =
     response.success?.warnings?.map((warning) => warning.code ?? 'Warning') ?? [];
+  const nextState = response.success?.state ?? context.state;
   return {
     summary: 'Simulation step applied',
     warnings: warningCodes,
-    contractYaml: response.success?.contract_yaml ?? contractYaml
+    context: {
+      contractYaml: response.success?.contract_yaml ?? context.contractYaml,
+      state: nextState,
+      minTime: getMinTime(nextState)
+    }
   };
 }

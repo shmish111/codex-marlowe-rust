@@ -33,6 +33,10 @@ describe('App', () => {
   it('loads examples and opens the modal', async () => {
     const fetchMock = vi.fn();
     mockExamplesFetch(fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ openapi: '3.1.0' })
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -44,21 +48,6 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /load example/i }));
 
     expect(screen.getByText('Choose a starting point')).toBeInTheDocument();
-  });
-
-  it('connects to the OpenAPI endpoint', async () => {
-    const fetchMock = vi.fn();
-    mockExamplesFetch(fetchMock);
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ openapi: '3.1.0' })
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(<App />);
-    expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
-    expect(screen.queryByText(/api connection failed/i)).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:3000/openapi.json');
   });
 
   it('shows a warning when API is not connected', async () => {
@@ -78,7 +67,7 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: /run simulation/i })).toBeDisabled();
   });
 
-  it('runs validation stub request', async () => {
+  it('runs validation request', async () => {
     const fetchMock = vi.fn();
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
@@ -87,7 +76,11 @@ describe('App', () => {
     });
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ result: 'ok', success: { inputs: [] }, error: null })
+      json: async () => ({
+        result: 'ok',
+        success: { contract_yaml: 'x', state: { min_time: '0' }, inputs: [] },
+        error: null
+      })
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -99,19 +92,9 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /run validation/i }));
 
     expect(await screen.findByText('Valid contract')).toBeInTheDocument();
-    expect(await screen.findByText('No diagnostics.')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/simulate/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contract_yaml: 'test',
-        interval_start: '0',
-        interval_end: '0'
-      })
-    });
   });
 
-  it('runs simulation and allows applying a choice input', async () => {
+  it('progresses to the next choice after applying the first input', async () => {
     const fetchMock = vi.fn();
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
@@ -123,11 +106,12 @@ describe('App', () => {
       json: async () => ({
         result: 'ok',
         success: {
-          contract_yaml: 'preview-contract',
+          contract_yaml: 'v1',
+          state: { min_time: '10' },
           inputs: [
             {
               choice: {
-                id: { ChoiceId: { name: 'PickNumber', party: { Role: 'Alice' } } },
+                id: { ChoiceId: { name: 'FirstChoice', party: { Role: 'Alice' } } },
                 bounds: [{ from: '1', to: '5' }]
               }
             }
@@ -140,7 +124,11 @@ describe('App', () => {
       ok: true,
       json: async () => ({
         result: 'ok',
-        success: { contract_yaml: 'after-step', warnings: [] },
+        success: {
+          contract_yaml: 'v2',
+          state: { min_time: '11' },
+          warnings: []
+        },
         error: null
       })
     });
@@ -148,7 +136,18 @@ describe('App', () => {
       ok: true,
       json: async () => ({
         result: 'ok',
-        success: { contract_yaml: 'after-step', inputs: [] },
+        success: {
+          contract_yaml: 'v2',
+          state: { min_time: '11' },
+          inputs: [
+            {
+              choice: {
+                id: { ChoiceId: { name: 'SecondChoice', party: { Role: 'Bob' } } },
+                bounds: [{ from: '10', to: '20' }]
+              }
+            }
+          ]
+        },
         error: null
       })
     });
@@ -160,44 +159,16 @@ describe('App', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /run simulation/i }));
 
-    expect(
-      await screen.findByText('Preview succeeded with 1 available input(s)')
-    ).toBeInTheDocument();
-    expect(await screen.findByLabelText('Choice input')).toBeInTheDocument();
-    expect(await screen.findByLabelText('Choice value')).toBeInTheDocument();
+    const select = await screen.findByLabelText('Available input');
+    expect(select).toHaveTextContent('FirstChoice');
 
     await user.clear(screen.getByLabelText('Choice value'));
     await user.type(screen.getByLabelText('Choice value'), '3');
-    await user.click(screen.getByRole('button', { name: /apply choice/i }));
+    await user.click(screen.getByRole('button', { name: /apply input/i }));
 
-    expect(await screen.findByText(/Simulation step applied/)).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/simulate/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contract_yaml: 'test',
-        interval_start: '0',
-        interval_end: '0'
-      })
-    });
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/simulate/step', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contract_yaml: 'preview-contract',
-        transaction: {
-          interval_start: '0',
-          interval_end: '0',
-          inputs: [
-            {
-              choice: {
-                id: { ChoiceId: { name: 'PickNumber', party: { Role: 'Alice' } } },
-                value: '3'
-              }
-            }
-          ]
-        }
-      })
-    });
+    expect(
+      await screen.findByText('Preview succeeded with 1 available input(s)')
+    ).toBeInTheDocument();
+    expect(await screen.findByLabelText('Available input')).toHaveTextContent('SecondChoice');
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { simulateChoiceStep, simulateContract, validateContract } from './api/client';
+import { simulateContract, simulateStep, validateContract } from './api/client';
+import type { SimulationInput, SimulationResponse } from './api/client';
 import './styles.css';
 
 const OPEN_API_URL = 'http://127.0.0.1:3000/openapi.json';
@@ -23,17 +24,7 @@ type ValidationState =
 type SimulationState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | {
-      status: 'success';
-      summary: string;
-      warnings: string[];
-      choices: Array<{
-        id: Record<string, unknown>;
-        name: string;
-        bounds: Array<{ from: string; to: string }>;
-      }>;
-      contractYaml: string;
-    }
+  | { status: 'success'; result: SimulationResponse }
   | { status: 'error'; message: string };
 
 export default function App() {
@@ -49,7 +40,7 @@ export default function App() {
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
   const [isValidationRunning, setValidationRunning] = useState(false);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
-  const [selectedChoiceKey, setSelectedChoiceKey] = useState<string>('');
+  const [selectedInputKey, setSelectedInputKey] = useState<string>('');
   const [choiceValue, setChoiceValue] = useState<string>('0');
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
@@ -128,13 +119,33 @@ export default function App() {
     [examples]
   );
 
-  const handleValidate = async () => {
-    if (apiStatus !== 'connected') {
-      const connected = await checkApiConnection();
-      if (!connected) {
-        setValidationState({ status: 'error', message: 'API not connected.' });
-        return;
+  const runPreview = async (yaml: string, state: Record<string, unknown> | null = null) => {
+    const result = await simulateContract(yaml, state);
+    setSimulationState({ status: 'success', result });
+
+    if (result.inputs[0]) {
+      setSelectedInputKey(JSON.stringify(result.inputs[0]));
+      if (result.inputs[0].kind === 'choice') {
+        setChoiceValue(result.inputs[0].bounds[0]?.from ?? '0');
       }
+    } else {
+      setSelectedInputKey('');
+    }
+  };
+
+  const ensureApiConnection = async (): Promise<boolean> => {
+    if (apiStatus === 'connected') {
+      return true;
+    }
+
+    return checkApiConnection();
+  };
+
+  const handleValidate = async () => {
+    const connected = await ensureApiConnection();
+    if (!connected) {
+      setValidationState({ status: 'error', message: 'API not connected.' });
+      return;
     }
 
     setValidationRunning(true);
@@ -155,29 +166,16 @@ export default function App() {
   };
 
   const handleSimulate = async () => {
-    if (apiStatus !== 'connected') {
-      const connected = await checkApiConnection();
-      if (!connected) {
-        setSimulationState({ status: 'error', message: 'API not connected.' });
-        return;
-      }
+    const connected = await ensureApiConnection();
+    if (!connected) {
+      setSimulationState({ status: 'error', message: 'API not connected.' });
+      return;
     }
 
     setSimulationRunning(true);
     setSimulationState({ status: 'loading' });
     try {
-      const result = await simulateContract(code);
-      setSimulationState({
-        status: 'success',
-        summary: result.summary,
-        warnings: result.warnings,
-        choices: result.choices,
-        contractYaml: result.contractYaml
-      });
-      if (result.choices[0]) {
-        setSelectedChoiceKey(JSON.stringify(result.choices[0].id));
-        setChoiceValue(result.choices[0].bounds[0]?.from ?? '0');
-      }
+      await runPreview(code);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setSimulationState({ status: 'error', message });
@@ -186,39 +184,27 @@ export default function App() {
     }
   };
 
-  const handleApplyChoice = async () => {
-    if (simulationState.status !== 'success') {
-      return;
-    }
+  const selectedSimulationInput =
+    simulationState.status === 'success'
+      ? (simulationState.result.inputs.find(
+          (input) => JSON.stringify(input) === selectedInputKey
+        ) ?? null)
+      : null;
 
-    const selectedChoice = simulationState.choices.find(
-      (choice) => JSON.stringify(choice.id) === selectedChoiceKey
-    );
-
-    if (!selectedChoice) {
+  const handleApplyInput = async () => {
+    if (simulationState.status !== 'success' || !selectedSimulationInput) {
       return;
     }
 
     setSimulationRunning(true);
     setSimulationState({ status: 'loading' });
     try {
-      const stepResult = await simulateChoiceStep(
-        simulationState.contractYaml,
-        selectedChoice.id,
+      const stepResult = await simulateStep(
+        simulationState.result.context,
+        selectedSimulationInput,
         choiceValue
       );
-      const nextPreview = await simulateContract(stepResult.contractYaml);
-      setSimulationState({
-        status: 'success',
-        summary: `${stepResult.summary}. ${nextPreview.summary}`,
-        warnings: [...stepResult.warnings, ...nextPreview.warnings],
-        choices: nextPreview.choices,
-        contractYaml: nextPreview.contractYaml
-      });
-      if (nextPreview.choices[0]) {
-        setSelectedChoiceKey(JSON.stringify(nextPreview.choices[0].id));
-        setChoiceValue(nextPreview.choices[0].bounds[0]?.from ?? '0');
-      }
+      await runPreview(stepResult.context.contractYaml, stepResult.context.state);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setSimulationState({ status: 'error', message });
@@ -227,7 +213,18 @@ export default function App() {
     }
   };
 
-  const isApiConnected = apiStatus === 'connected';
+  const renderInputLabel = (input: SimulationInput): string => {
+    if (input.kind === 'choice') {
+      const bounds = input.bounds.map((bound) => `${bound.from}..${bound.to}`).join(', ');
+      return `Choice: ${input.name} (${bounds})`;
+    }
+
+    if (input.kind === 'deposit') {
+      return `Deposit: ${input.amount}`;
+    }
+
+    return 'Notify';
+  };
 
   return (
     <div className="app">
@@ -308,7 +305,7 @@ export default function App() {
                 className="panel-action"
                 type="button"
                 onClick={handleValidate}
-                disabled={!isApiConnected || isValidationRunning}
+                disabled={apiStatus !== 'connected' || isValidationRunning}
               >
                 Run validation
               </button>
@@ -346,12 +343,12 @@ export default function App() {
             </div>
             <div className="panel-card">
               <h3>Simulation</h3>
-              <p>Preview outcomes once the backend API is connected.</p>
+              <p>Preview outcomes and step through required inputs.</p>
               <button
                 className="panel-action"
                 type="button"
                 onClick={handleSimulate}
-                disabled={!isApiConnected || isSimulationRunning}
+                disabled={apiStatus !== 'connected' || isSimulationRunning}
               >
                 Run simulation
               </button>
@@ -368,54 +365,57 @@ export default function App() {
               ) : null}
               {simulationState.status === 'success' ? (
                 <div className="panel-block">
-                  <p className="panel-result">{simulationState.summary}</p>
-                  {simulationState.choices.length > 0 ? (
+                  <p className="panel-result">{simulationState.result.summary}</p>
+                  {simulationState.result.inputs.length > 0 ? (
                     <div className="choice-form">
-                      <label className="choice-form__label" htmlFor="choice-select">
-                        Choice input
+                      <label className="choice-form__label" htmlFor="input-select">
+                        Available input
                       </label>
                       <select
-                        id="choice-select"
+                        id="input-select"
                         className="choice-form__select"
-                        value={selectedChoiceKey}
-                        onChange={(event) => setSelectedChoiceKey(event.target.value)}
+                        value={selectedInputKey}
+                        onChange={(event) => setSelectedInputKey(event.target.value)}
                       >
-                        {simulationState.choices.map((choice) => {
-                          const key = JSON.stringify(choice.id);
-                          const bounds = choice.bounds
-                            .map((bound) => `${bound.from}..${bound.to}`)
-                            .join(', ');
+                        {simulationState.result.inputs.map((input) => {
+                          const key = JSON.stringify(input);
                           return (
                             <option key={key} value={key}>
-                              {choice.name} ({bounds})
+                              {renderInputLabel(input)}
                             </option>
                           );
                         })}
                       </select>
-                      <label className="choice-form__label" htmlFor="choice-value">
-                        Choice value
-                      </label>
-                      <input
-                        id="choice-value"
-                        className="choice-form__input"
-                        value={choiceValue}
-                        onChange={(event) => setChoiceValue(event.target.value)}
-                      />
+                      {selectedSimulationInput?.kind === 'choice' ? (
+                        <>
+                          <label className="choice-form__label" htmlFor="choice-value">
+                            Choice value
+                          </label>
+                          <input
+                            id="choice-value"
+                            className="choice-form__input"
+                            value={choiceValue}
+                            onChange={(event) => setChoiceValue(event.target.value)}
+                          />
+                        </>
+                      ) : null}
                       <button
                         className="panel-action"
                         type="button"
-                        disabled={isSimulationRunning}
-                        onClick={handleApplyChoice}
+                        disabled={isSimulationRunning || !selectedSimulationInput}
+                        onClick={handleApplyInput}
                       >
-                        Apply choice
+                        Apply input
                       </button>
                     </div>
-                  ) : null}
-                  {simulationState.warnings.length === 0 ? (
+                  ) : (
+                    <div className="panel-badge panel-badge--ok">No further inputs available</div>
+                  )}
+                  {simulationState.result.warnings.length === 0 ? (
                     <div className="panel-badge panel-badge--ok">No warnings</div>
                   ) : (
                     <ul className="panel-list">
-                      {simulationState.warnings.map((warning, index) => (
+                      {simulationState.result.warnings.map((warning, index) => (
                         <li key={`${warning}-${index}`}>{warning}</li>
                       ))}
                     </ul>
