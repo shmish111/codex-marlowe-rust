@@ -43,6 +43,7 @@ Key syntax rules:
 The HTTP server exposes this as:
 
 - `POST /simulate/step`
+- `POST /simulate/preview`
 
 Request payload fields:
 
@@ -54,6 +55,16 @@ The endpoint returns either:
 
 - `result = "success"` with updated state, payments, warnings, and next `contract_yaml`
 - `result = "error"` with a structured simulator error code/message
+
+Error payloads include frontend-locatable fields:
+
+- `error.path` for the primary failing location
+- `error.diagnostics[]` for detailed type/hole/param issues, each with its own `path`
+
+`/simulate/preview` returns:
+
+- reduced contract/state for the given interval
+- currently-available `deposit` / `choice` / `notify` inputs at quiescence
 
 ## Testing
 

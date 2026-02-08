@@ -128,6 +128,30 @@ pub enum SimTransactionResult {
     Error(SimError),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewResult {
+    pub state: SimState,
+    pub contract: Contract,
+    pub inputs: Vec<PreviewInput>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewInput {
+    Deposit {
+        into: Party,
+        by: Party,
+        token: Token,
+        amount: BigInt,
+    },
+    Choice {
+        id: ChoiceId,
+        bounds: Vec<(BigInt, BigInt)>,
+    },
+    Notify {
+        can_notify: bool,
+    },
+}
+
 #[derive(Clone)]
 struct Environment {
     start: BigInt,
@@ -170,6 +194,35 @@ pub fn simulate_transaction(
         state: applied.state,
         contract: applied.contract,
     }))
+}
+
+pub fn preview_inputs(
+    contract: &Contract,
+    state: &SimState,
+    interval_start: &BigInt,
+    interval_end: &BigInt,
+) -> Result<PreviewResult, SimError> {
+    let check = type_check(contract, &TypeCheckContext::default());
+    if !check.errors.is_empty() || !check.holes.is_empty() || !check.params.is_empty() {
+        return Err(SimError::NotReadyToRun);
+    }
+
+    let (environment, fixed_state) = fix_interval(interval_start, interval_end, state)?;
+    let reduced = reduce_until_quiescent(&environment, &fixed_state, contract)?;
+
+    let inputs = match &reduced.contract {
+        Contract::When { cases, .. } => cases
+            .iter()
+            .filter_map(|case| preview_case(case, &reduced.state, &environment))
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    Ok(PreviewResult {
+        state: reduced.state,
+        contract: reduced.contract,
+        inputs,
+    })
 }
 
 fn fix_interval(
@@ -570,6 +623,40 @@ fn apply_input(
     }
 
     None
+}
+
+fn preview_case(case: &Case, state: &SimState, environment: &Environment) -> Option<PreviewInput> {
+    let Case::Case { action, .. } = case else {
+        return None;
+    };
+
+    match action {
+        Action::Deposit {
+            into,
+            by,
+            token,
+            amount,
+        } => Some(PreviewInput::Deposit {
+            into: into.clone(),
+            by: by.clone(),
+            token: token.clone(),
+            amount: eval_value(state, environment, amount),
+        }),
+        Action::Choice { id, bounds } => Some(PreviewInput::Choice {
+            id: id.clone(),
+            bounds: bounds
+                .iter()
+                .filter_map(|bound| match bound {
+                    Bound::Bound { from, to } => Some((constant_value(from)?, constant_value(to)?)),
+                    Bound::Hole(_) => None,
+                })
+                .collect(),
+        }),
+        Action::Notify { if_ } => Some(PreviewInput::Notify {
+            can_notify: eval_observation(state, environment, if_),
+        }),
+        Action::Hole(_) => None,
+    }
 }
 
 fn in_bounds(value: &BigInt, bounds: &[Bound]) -> bool {

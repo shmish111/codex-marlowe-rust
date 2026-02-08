@@ -13,9 +13,10 @@ use crate::{
     ast::{ChoiceId, Party, PayeeTarget, Token},
     contract_to_yaml_string, parse_contract_yaml,
     sim::{
-        simulate_transaction, AccountId, Payment, SimError, SimInput, SimState, SimTransaction,
-        SimTransactionResult, TransactionWarning,
+        preview_inputs, simulate_transaction, AccountId, Payment, PreviewInput, SimError, SimInput,
+        SimState, SimTransaction, SimTransactionResult, TransactionWarning,
     },
+    type_check, TypeCheckContext,
 };
 
 #[derive(Clone, Default)]
@@ -25,6 +26,7 @@ pub fn build_router() -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/simulate/step", post(simulate_step_handler))
+        .route("/simulate/preview", post(simulate_preview_handler))
         .with_state(AppState)
 }
 
@@ -76,6 +78,15 @@ pub struct SimulateTxRequest {
     pub interval_end: BigIntValue,
     #[serde(default)]
     pub inputs: Vec<SimInputRequest>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SimulatePreviewRequest {
+    pub contract_yaml: String,
+    #[serde(default)]
+    pub state: SimulateStateRequest,
+    pub interval_start: BigIntValue,
+    pub interval_end: BigIntValue,
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +151,17 @@ pub struct SimulateSuccessResponse {
 pub struct SimulateErrorResponse {
     pub code: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ErrorDiagnosticResponse {
+    pub code: String,
+    pub path: String,
+    pub message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -177,23 +199,122 @@ pub struct ChoiceValueResponse {
     pub value: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SimulatePreviewResponse {
+    pub result: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<PreviewSuccessResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<SimulateErrorResponse>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreviewSuccessResponse {
+    pub state: StateResponse,
+    pub contract_yaml: String,
+    pub inputs: Vec<PreviewInputResponse>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewInputResponse {
+    Deposit {
+        into: Party,
+        by: Party,
+        token: Token,
+        amount: String,
+    },
+    Choice {
+        id: ChoiceId,
+        bounds: Vec<PreviewBoundResponse>,
+    },
+    Notify {
+        can_notify: bool,
+    },
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreviewBoundResponse {
+    pub from: String,
+    pub to: String,
+}
+
 pub async fn simulate_step_handler(
     State(_): State<AppState>,
     Json(request): Json<SimulateStepRequest>,
 ) -> (StatusCode, Json<SimulateStepResponse>) {
     let contract = match parse_contract_yaml(&request.contract_yaml) {
         Ok(contract) => contract,
-        Err(err) => return bad_request("ParseError", format!("{}: {}", err.path, err.message)),
+        Err(err) => {
+            return bad_request(
+                "ParseError",
+                format!("{}: {}", err.path, err.message),
+                Some(err.path),
+                None,
+            )
+        }
+    };
+
+    let validation = type_check(&contract, &TypeCheckContext::default());
+    if !validation.errors.is_empty()
+        || !validation.holes.is_empty()
+        || !validation.params.is_empty()
+    {
+        let mut diagnostics = Vec::new();
+        for error in &validation.errors {
+            diagnostics.push(ErrorDiagnosticResponse {
+                code: "TypeError".to_owned(),
+                path: error.path.clone(),
+                message: error.message.clone(),
+            });
+        }
+        for hole in &validation.holes {
+            diagnostics.push(ErrorDiagnosticResponse {
+                code: "Hole".to_owned(),
+                path: hole.path.clone(),
+                message: format!(
+                    "hole '{}' has inferred type {}",
+                    hole.name,
+                    hole.ty.as_str()
+                ),
+            });
+        }
+        for param in &validation.params {
+            diagnostics.push(ErrorDiagnosticResponse {
+                code: "Param".to_owned(),
+                path: param.path.clone(),
+                message: format!(
+                    "parameter '{}' has inferred type {} and must be instantiated",
+                    param.name,
+                    param.ty.as_str()
+                ),
+            });
+        }
+        return bad_request(
+            "NotReadyToRun",
+            "contract must be fully instantiated and type-safe before simulation".to_owned(),
+            Some("$.contract_yaml".to_owned()),
+            Some(diagnostics),
+        );
     };
 
     let state = match map_state_request(request.state) {
         Ok(state) => state,
-        Err(message) => return bad_request("StateError", message),
+        Err(message) => {
+            return bad_request("StateError", message, Some("$.state".to_owned()), None)
+        }
     };
 
     let transaction = match map_tx_request(request.transaction) {
         Ok(transaction) => transaction,
-        Err(message) => return bad_request("TransactionError", message),
+        Err(message) => {
+            return bad_request(
+                "TransactionError",
+                message,
+                Some("$.transaction".to_owned()),
+                None,
+            )
+        }
     };
 
     match simulate_transaction(&contract, &state, &transaction) {
@@ -215,9 +336,135 @@ pub async fn simulate_step_handler(
             };
             (StatusCode::OK, Json(response))
         }
-        SimTransactionResult::Error(err) => {
-            bad_request(&sim_error_code(&err), sim_error_message(&err))
+        SimTransactionResult::Error(err) => bad_request(
+            &sim_error_code(&err),
+            sim_error_message(&err),
+            sim_error_path(&err),
+            None,
+        ),
+    }
+}
+
+pub async fn simulate_preview_handler(
+    State(_): State<AppState>,
+    Json(request): Json<SimulatePreviewRequest>,
+) -> (StatusCode, Json<SimulatePreviewResponse>) {
+    let contract = match parse_contract_yaml(&request.contract_yaml) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return preview_bad_request(
+                "ParseError",
+                format!("{}: {}", err.path, err.message),
+                Some(err.path),
+                None,
+            )
         }
+    };
+
+    let validation = type_check(&contract, &TypeCheckContext::default());
+    if !validation.errors.is_empty()
+        || !validation.holes.is_empty()
+        || !validation.params.is_empty()
+    {
+        let mut diagnostics = Vec::new();
+        for error in &validation.errors {
+            diagnostics.push(ErrorDiagnosticResponse {
+                code: "TypeError".to_owned(),
+                path: error.path.clone(),
+                message: error.message.clone(),
+            });
+        }
+        for hole in &validation.holes {
+            diagnostics.push(ErrorDiagnosticResponse {
+                code: "Hole".to_owned(),
+                path: hole.path.clone(),
+                message: format!(
+                    "hole '{}' has inferred type {}",
+                    hole.name,
+                    hole.ty.as_str()
+                ),
+            });
+        }
+        for param in &validation.params {
+            diagnostics.push(ErrorDiagnosticResponse {
+                code: "Param".to_owned(),
+                path: param.path.clone(),
+                message: format!(
+                    "parameter '{}' has inferred type {} and must be instantiated",
+                    param.name,
+                    param.ty.as_str()
+                ),
+            });
+        }
+        return preview_bad_request(
+            "NotReadyToRun",
+            "contract must be fully instantiated and type-safe before simulation".to_owned(),
+            Some("$.contract_yaml".to_owned()),
+            Some(diagnostics),
+        );
+    };
+
+    let state = match map_state_request(request.state) {
+        Ok(state) => state,
+        Err(message) => {
+            return preview_bad_request("StateError", message, Some("$.state".to_owned()), None)
+        }
+    };
+    let interval_start = match request.interval_start.into_bigint() {
+        Ok(value) => value,
+        Err(message) => {
+            return preview_bad_request(
+                "TransactionError",
+                message,
+                Some("$.interval_start".to_owned()),
+                None,
+            )
+        }
+    };
+    let interval_end = match request.interval_end.into_bigint() {
+        Ok(value) => value,
+        Err(message) => {
+            return preview_bad_request(
+                "TransactionError",
+                message,
+                Some("$.interval_end".to_owned()),
+                None,
+            )
+        }
+    };
+
+    match preview_inputs(&contract, &state, &interval_start, &interval_end) {
+        Ok(preview) => {
+            let contract_yaml = match contract_to_yaml_string(&preview.contract) {
+                Ok(yaml) => yaml,
+                Err(err) => {
+                    return preview_internal_error(format!("failed to serialize contract: {err}"))
+                }
+            };
+
+            (
+                StatusCode::OK,
+                Json(SimulatePreviewResponse {
+                    result: "success",
+                    success: Some(PreviewSuccessResponse {
+                        state: state_to_response(&preview.state),
+                        contract_yaml,
+                        inputs: preview
+                            .inputs
+                            .iter()
+                            .map(preview_input_to_response)
+                            .collect(),
+                    }),
+                    error: None,
+                }),
+            )
+        }
+        Err(err) => preview_bad_request(
+            &sim_error_code(&err),
+            sim_error_message(&err),
+            sim_error_path(&err),
+            None,
+        ),
     }
 }
 
@@ -344,7 +591,41 @@ fn state_to_response(state: &SimState) -> StateResponse {
     }
 }
 
-fn bad_request(code: &str, message: String) -> (StatusCode, Json<SimulateStepResponse>) {
+fn preview_input_to_response(input: &PreviewInput) -> PreviewInputResponse {
+    match input {
+        PreviewInput::Deposit {
+            into,
+            by,
+            token,
+            amount,
+        } => PreviewInputResponse::Deposit {
+            into: into.clone(),
+            by: by.clone(),
+            token: token.clone(),
+            amount: amount.to_string(),
+        },
+        PreviewInput::Choice { id, bounds } => PreviewInputResponse::Choice {
+            id: id.clone(),
+            bounds: bounds
+                .iter()
+                .map(|(from, to)| PreviewBoundResponse {
+                    from: from.to_string(),
+                    to: to.to_string(),
+                })
+                .collect(),
+        },
+        PreviewInput::Notify { can_notify } => PreviewInputResponse::Notify {
+            can_notify: *can_notify,
+        },
+    }
+}
+
+fn bad_request(
+    code: &str,
+    message: String,
+    path: Option<String>,
+    diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
+) -> (StatusCode, Json<SimulateStepResponse>) {
     (
         StatusCode::BAD_REQUEST,
         Json(SimulateStepResponse {
@@ -353,6 +634,8 @@ fn bad_request(code: &str, message: String) -> (StatusCode, Json<SimulateStepRes
             error: Some(SimulateErrorResponse {
                 code: code.to_owned(),
                 message,
+                path,
+                diagnostics,
             }),
         }),
     )
@@ -367,6 +650,45 @@ fn internal_error(message: String) -> (StatusCode, Json<SimulateStepResponse>) {
             error: Some(SimulateErrorResponse {
                 code: "InternalError".to_owned(),
                 message,
+                path: None,
+                diagnostics: None,
+            }),
+        }),
+    )
+}
+
+fn preview_bad_request(
+    code: &str,
+    message: String,
+    path: Option<String>,
+    diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
+) -> (StatusCode, Json<SimulatePreviewResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(SimulatePreviewResponse {
+            result: "error",
+            success: None,
+            error: Some(SimulateErrorResponse {
+                code: code.to_owned(),
+                message,
+                path,
+                diagnostics,
+            }),
+        }),
+    )
+}
+
+fn preview_internal_error(message: String) -> (StatusCode, Json<SimulatePreviewResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(SimulatePreviewResponse {
+            result: "error",
+            success: None,
+            error: Some(SimulateErrorResponse {
+                code: "InternalError".to_owned(),
+                message,
+                path: None,
+                diagnostics: None,
             }),
         }),
     )
@@ -413,5 +735,18 @@ fn sim_error_message(error: &SimError) -> String {
             )
         }
         SimError::UselessTransaction => "transaction made no state or contract changes".to_owned(),
+    }
+}
+
+fn sim_error_path(error: &SimError) -> Option<String> {
+    match error {
+        SimError::NotReadyToRun => Some("$.contract_yaml".to_owned()),
+        SimError::InvalidInterval { .. } => Some("$.transaction".to_owned()),
+        SimError::IntervalInPast { .. } => Some("$.transaction".to_owned()),
+        SimError::AmbiguousTimeInterval => Some("$.transaction".to_owned()),
+        SimError::NoMatchForInput { input_index } => {
+            Some(format!("$.transaction.inputs[{input_index}]"))
+        }
+        SimError::UselessTransaction => Some("$.transaction".to_owned()),
     }
 }

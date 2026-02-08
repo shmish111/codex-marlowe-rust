@@ -122,6 +122,13 @@ async fn simulate_step_rejects_uninstantiated_contract() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
     assert_eq!(json["error"]["code"], "NotReadyToRun");
+    assert_eq!(json["error"]["path"], "$.contract_yaml");
+    assert!(json["error"]["diagnostics"].is_array());
+    assert!(json["error"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "Param"));
 }
 
 #[tokio::test]
@@ -151,6 +158,61 @@ async fn simulate_step_rejects_ambiguous_interval() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
     assert_eq!(json["error"]["code"], "AmbiguousTimeInterval");
+    assert_eq!(json["error"]["path"], "$.transaction");
+}
+
+#[tokio::test]
+async fn simulate_step_no_match_input_has_input_path() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Alice" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 5 }
+        then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "transaction": {
+        "interval_start": "0",
+        "interval_end": "10",
+        "inputs": [
+          {
+            "deposit": {
+              "into": {"Role": "Alice"},
+              "by": {"Role": "Alice"},
+              "token": {"Token": {"currency_symbol": "", "token_name": ""}},
+              "amount": "2"
+            }
+          }
+        ]
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["error"]["code"], "NoMatchForInput");
+    assert_eq!(json["error"]["path"], "$.transaction.inputs[0]");
 }
 
 #[tokio::test]
@@ -200,4 +262,88 @@ Pay:
     let json = json_response(response).await;
     assert_eq!(json["success"]["payments"][0]["amount"], "40");
     assert_eq!(json["success"]["state"]["min_time"], "40");
+}
+
+#[tokio::test]
+async fn simulate_preview_lists_inputs_for_when_contract() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Alice" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 5 }
+        then: { Close: {} }
+    - Case:
+        action:
+          Notify:
+            if: { "True": {} }
+        then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "interval_start": "0",
+      "interval_end": "10"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/preview")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["inputs"].as_array().unwrap().len(), 2);
+    assert_eq!(json["success"]["inputs"][0]["deposit"]["amount"], "5");
+    assert_eq!(json["success"]["inputs"][1]["notify"]["can_notify"], true);
+}
+
+#[tokio::test]
+async fn simulate_preview_returns_locatable_not_ready_error() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases: []
+  timeout: "$deadline"
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "interval_start": "0",
+      "interval_end": "10"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/preview")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["error"]["code"], "NotReadyToRun");
+    assert_eq!(json["error"]["path"], "$.contract_yaml");
+    assert!(json["error"]["diagnostics"].is_array());
 }

@@ -38,6 +38,7 @@ pub struct TypeCheckContext {
 pub struct TypedSymbol {
     pub name: String,
     pub ty: DslType,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,6 +101,7 @@ impl<'a> Checker<'a> {
             .map(|(name, record)| TypedSymbol {
                 name,
                 ty: record.ty,
+                path: record.first_path,
             })
             .collect();
         holes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -110,6 +112,7 @@ impl<'a> Checker<'a> {
             .map(|(name, record)| TypedSymbol {
                 name,
                 ty: record.ty,
+                path: record.first_path,
             })
             .collect();
         params.sort_by(|a, b| a.name.cmp(&b.name));
