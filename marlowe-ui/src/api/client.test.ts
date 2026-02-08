@@ -9,7 +9,7 @@ describe('api client', () => {
   it('posts validation payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ valid: true, diagnostics: [] })
+      json: async () => ({ result: 'ok', success: { inputs: [] }, error: null })
     });
 
     vi.stubGlobal('fetch', fetchMock);
@@ -17,10 +17,14 @@ describe('api client', () => {
     const result = await validateContract('contract-code');
 
     expect(result.valid).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith('/api/validate', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: 'contract-code' })
+      body: JSON.stringify({
+        contract_yaml: 'contract-code',
+        interval_start: '0',
+        interval_end: '0'
+      })
     });
   });
 
@@ -34,5 +38,26 @@ describe('api client', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(simulateContract('bad-contract')).rejects.toThrow('Request failed (400)');
+  });
+
+  it('maps preview diagnostics as validation errors', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'error',
+        error: {
+          code: 'SIM',
+          subcode: 'INVALID_CONTRACT',
+          message: 'Invalid contract',
+          diagnostics: [{ code: 'X', subcode: 'Y', path: 'root', message: 'Bad yaml' }]
+        }
+      })
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await validateContract('bad-contract');
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toEqual(['Bad yaml']);
   });
 });

@@ -70,7 +70,7 @@ describe('App', () => {
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ valid: true, diagnostics: ['all good'] })
+      json: async () => ({ result: 'ok', success: { inputs: [] }, error: null })
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -80,11 +80,15 @@ describe('App', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /run validation stub/i }));
 
-    expect(await screen.findByText('Valid. Diagnostics: all good')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/validate', {
+    expect(await screen.findByText('Valid with no diagnostics.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: 'test' })
+      body: JSON.stringify({
+        contract_yaml: 'test',
+        interval_start: '0',
+        interval_end: '0'
+      })
     });
   });
 
@@ -93,7 +97,7 @@ describe('App', () => {
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ summary: 'Simulation complete', warnings: [] })
+      json: async () => ({ result: 'ok', success: { inputs: [{}] }, error: null })
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -103,11 +107,17 @@ describe('App', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: /run simulation stub/i }));
 
-    expect(await screen.findByText('Simulation complete. No warnings.')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/simulate', {
+    expect(
+      await screen.findByText('Preview succeeded with 1 available input(s). No warnings.')
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: 'test' })
+      body: JSON.stringify({
+        contract_yaml: 'test',
+        interval_start: '0',
+        interval_end: '0'
+      })
     });
   });
 });
