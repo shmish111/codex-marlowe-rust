@@ -325,8 +325,10 @@ dependencies = [
  "num-traits",
  "proptest",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tokio",
+ "tower",
 ]
 
 [[package]]
