@@ -878,19 +878,142 @@
         ]
       },
       "WarningResponse": {
-        "type": "object",
-        "required": [
-          "kind",
-          "details"
-        ],
-        "properties": {
-          "details": {
-            "type": "string"
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "into",
+              "by",
+              "token",
+              "amount",
+              "code"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "by": {
+                "$ref": "#/components/schemas/Party"
+              },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "NonPositiveDeposit"
+                ]
+              },
+              "into": {
+                "$ref": "#/components/schemas/Party"
+              },
+              "token": {
+                "$ref": "#/components/schemas/Token"
+              }
+            }
           },
-          "kind": {
-            "type": "string"
+          {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "token",
+              "amount",
+              "code"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "NonPositivePay"
+                ]
+              },
+              "from": {
+                "$ref": "#/components/schemas/Party"
+              },
+              "to": {
+                "$ref": "#/components/schemas/PayeeTarget"
+              },
+              "token": {
+                "$ref": "#/components/schemas/Token"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "from",
+              "to",
+              "token",
+              "expected",
+              "paid",
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "PartialPay"
+                ]
+              },
+              "expected": {
+                "type": "string"
+              },
+              "from": {
+                "$ref": "#/components/schemas/Party"
+              },
+              "paid": {
+                "type": "string"
+              },
+              "to": {
+                "$ref": "#/components/schemas/PayeeTarget"
+              },
+              "token": {
+                "$ref": "#/components/schemas/Token"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "old",
+              "new",
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "Shadowing"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "new": {
+                "type": "string"
+              },
+              "old": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "AssertionFailed"
+                ]
+              }
+            }
           }
-        }
+        ]
       }
     }
   },

@@ -200,9 +200,33 @@ pub struct ErrorDiagnosticResponse {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct WarningResponse {
-    pub kind: String,
-    pub details: String,
+#[serde(tag = "code")]
+pub enum WarningResponse {
+    NonPositiveDeposit {
+        into: Party,
+        by: Party,
+        token: Token,
+        amount: String,
+    },
+    NonPositivePay {
+        from: Party,
+        to: PayeeTarget,
+        token: Token,
+        amount: String,
+    },
+    PartialPay {
+        from: Party,
+        to: PayeeTarget,
+        token: Token,
+        expected: String,
+        paid: String,
+    },
+    Shadowing {
+        name: String,
+        old: String,
+        new: String,
+    },
+    AssertionFailed {},
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -682,26 +706,47 @@ fn map_tx_request(request: SimulateTxRequest) -> Result<SimTransaction, String> 
 
 fn warning_to_response(warning: &TransactionWarning) -> WarningResponse {
     match warning {
-        TransactionWarning::NonPositiveDeposit { amount, .. } => WarningResponse {
-            kind: "NonPositiveDeposit".to_owned(),
-            details: format!("deposit amount {} is not positive", amount),
+        TransactionWarning::NonPositiveDeposit {
+            into,
+            by,
+            token,
+            amount,
+        } => WarningResponse::NonPositiveDeposit {
+            into: into.clone(),
+            by: by.clone(),
+            token: token.clone(),
+            amount: amount.to_string(),
         },
-        TransactionWarning::NonPositivePay { amount, .. } => WarningResponse {
-            kind: "NonPositivePay".to_owned(),
-            details: format!("pay amount {} is not positive", amount),
+        TransactionWarning::NonPositivePay {
+            from,
+            to,
+            token,
+            amount,
+        } => WarningResponse::NonPositivePay {
+            from: from.clone(),
+            to: to.clone(),
+            token: token.clone(),
+            amount: amount.to_string(),
         },
-        TransactionWarning::PartialPay { expected, paid, .. } => WarningResponse {
-            kind: "PartialPay".to_owned(),
-            details: format!("expected {}, paid {}", expected, paid),
+        TransactionWarning::PartialPay {
+            from,
+            to,
+            token,
+            expected,
+            paid,
+        } => WarningResponse::PartialPay {
+            from: from.clone(),
+            to: to.clone(),
+            token: token.clone(),
+            expected: expected.to_string(),
+            paid: paid.to_string(),
         },
-        TransactionWarning::Shadowing { name, .. } => WarningResponse {
-            kind: "Shadowing".to_owned(),
-            details: format!("let value '{}' was shadowed", name),
+        TransactionWarning::Shadowing { name, old, new } => WarningResponse::Shadowing {
+            name: name.clone(),
+            old: old.to_string(),
+            new: new.to_string(),
         },
-        TransactionWarning::AssertionFailed => WarningResponse {
-            kind: "AssertionFailed".to_owned(),
-            details: "assertion evaluated to false".to_owned(),
-        },
+        TransactionWarning::AssertionFailed => WarningResponse::AssertionFailed {},
     }
 }
 

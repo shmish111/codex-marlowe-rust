@@ -289,6 +289,119 @@ Pay:
 }
 
 #[tokio::test]
+async fn simulate_step_returns_typed_non_positive_deposit_warning() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Alice" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 0 }
+        then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "transaction": {
+        "interval_start": "0",
+        "interval_end": "10",
+        "inputs": [
+          {
+            "deposit": {
+              "into": {"Role": "Alice"},
+              "by": {"Role": "Alice"},
+              "token": {"Token": {"currency_symbol": "", "token_name": ""}},
+              "amount": "0"
+            }
+          }
+        ]
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["success"]["warnings"][0]["code"], "NonPositiveDeposit");
+    assert_eq!(json["success"]["warnings"][0]["amount"], "0");
+    assert_eq!(
+        json["success"]["warnings"][0]["into"],
+        json!({"Role": "Alice"})
+    );
+    assert!(json["success"]["warnings"][0].get("details").is_none());
+}
+
+#[tokio::test]
+async fn simulate_step_returns_typed_partial_pay_warning() {
+    let app = build_router();
+    let contract = r#"
+Pay:
+  from: { Role: "Alice" }
+  to_party: { Role: "Bob" }
+  token: { Token: { currency_symbol: "", token_name: "" } }
+  amount: { Constant: 10 }
+  then: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "state": {
+        "accounts": [
+          {
+            "owner": {"Role": "Alice"},
+            "token": {"Token": {"currency_symbol": "", "token_name": ""}},
+            "amount": "3"
+          }
+        ]
+      },
+      "transaction": {
+        "interval_start": "0",
+        "interval_end": "10",
+        "inputs": []
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["success"]["warnings"][0]["code"], "PartialPay");
+    assert_eq!(json["success"]["warnings"][0]["expected"], "10");
+    assert_eq!(json["success"]["warnings"][0]["paid"], "3");
+    assert_eq!(
+        json["success"]["warnings"][0]["to"],
+        json!({"ToParty": {"Role": "Bob"}})
+    );
+    assert!(json["success"]["warnings"][0].get("details").is_none());
+}
+
+#[tokio::test]
 async fn simulate_preview_lists_inputs_for_when_contract() {
     let app = build_router();
     let contract = r#"
