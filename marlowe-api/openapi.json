@@ -29,6 +29,24 @@
         }
       }
     },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "openapi_handler",
+        "responses": {
+          "200": {
+            "description": "OpenAPI document",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/simulate/preview": {
       "post": {
         "tags": [

@@ -26,6 +26,7 @@ pub struct AppState;
 pub fn build_router() -> Router {
     Router::new()
         .route("/health", get(health_handler))
+        .route("/openapi.json", get(openapi_handler))
         .route("/simulate/step", post(simulate_step_handler))
         .route("/simulate/preview", post(simulate_preview_handler))
         .with_state(AppState)
@@ -44,6 +45,18 @@ struct HealthResponse {
 )]
 async fn health_handler() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
+}
+
+#[utoipa::path(
+    get,
+    path = "/openapi.json",
+    tag = "health",
+    responses((status = 200, description = "OpenAPI document", body = serde_json::Value))
+)]
+async fn openapi_handler() -> Json<serde_json::Value> {
+    let doc = ApiDoc::openapi();
+    let value = serde_json::to_value(&doc).unwrap_or_else(|_| serde_json::json!({}));
+    Json(value)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -258,7 +271,12 @@ pub struct PreviewBoundResponse {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health_handler, simulate_step_handler, simulate_preview_handler),
+    paths(
+        health_handler,
+        openapi_handler,
+        simulate_step_handler,
+        simulate_preview_handler
+    ),
     components(
         schemas(
             HealthResponse,

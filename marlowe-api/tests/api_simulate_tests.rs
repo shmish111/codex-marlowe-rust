@@ -34,6 +34,27 @@ async fn health_endpoint_returns_ok() {
 }
 
 #[tokio::test]
+async fn openapi_endpoint_returns_spec() {
+    let app = build_router();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/openapi.json")
+                .method("GET")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    let status = response.status();
+    let json = json_response(response).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(json["paths"]["/simulate/step"].is_object());
+    assert!(json["paths"]["/simulate/preview"].is_object());
+}
+
+#[tokio::test]
 async fn simulate_step_success_response() {
     let app = build_router();
     let contract = r#"
