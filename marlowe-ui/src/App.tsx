@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { simulateContract, simulateStep, validateContract } from './api/client';
 import type { SimulationInput, SimulationResponse } from './api/client';
@@ -38,14 +38,15 @@ export default function App() {
   const [apiMessage, setApiMessage] = useState('API is not connected.');
   const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
-  const [isValidationRunning, setValidationRunning] = useState(false);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
+  const [hasUserEdited, setHasUserEdited] = useState(false);
   const [selectedInputKey, setSelectedInputKey] = useState<string>('');
   const [choiceValue, setChoiceValue] = useState<string>('0');
+  const validationRunIdRef = useRef(0);
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
 
-  const checkApiConnection = async (): Promise<boolean> => {
+  const checkApiConnection = useCallback(async (): Promise<boolean> => {
     setApiStatus('connecting');
     setApiMessage('Connecting to API...');
 
@@ -69,7 +70,7 @@ export default function App() {
       setApiMessage(`API connection failed: ${message}`);
       return false;
     }
-  };
+  }, []);
 
   useEffect(() => {
     const loadExamples = async () => {
@@ -94,7 +95,7 @@ export default function App() {
 
     loadExamples();
     void checkApiConnection();
-  }, []);
+  }, [checkApiConnection]);
 
   const exampleCards = useMemo(
     () =>
@@ -133,37 +134,46 @@ export default function App() {
     }
   };
 
-  const ensureApiConnection = async (): Promise<boolean> => {
+  const ensureApiConnection = useCallback(async (): Promise<boolean> => {
     if (apiStatus === 'connected') {
       return true;
     }
 
     return checkApiConnection();
-  };
+  }, [apiStatus, checkApiConnection]);
 
-  const handleValidate = async () => {
-    const connected = await ensureApiConnection();
-    if (!connected) {
-      setValidationState({ status: 'error', message: 'API not connected.' });
-      return;
-    }
+  const runValidation = useCallback(
+    async (sourceCode: string) => {
+      const connected = await ensureApiConnection();
+      if (!connected) {
+        setValidationState({ status: 'error', message: 'API not connected.' });
+        return;
+      }
 
-    setValidationRunning(true);
-    setValidationState({ status: 'loading' });
-    try {
-      const result = await validateContract(code);
-      setValidationState({
-        status: 'success',
-        valid: result.valid,
-        diagnostics: result.diagnostics
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setValidationState({ status: 'error', message });
-    } finally {
-      setValidationRunning(false);
-    }
-  };
+      const runId = ++validationRunIdRef.current;
+      setValidationState({ status: 'loading' });
+      try {
+        const result = await validateContract(sourceCode);
+        if (runId !== validationRunIdRef.current) {
+          return;
+        }
+
+        setValidationState({
+          status: 'success',
+          valid: result.valid,
+          diagnostics: result.diagnostics
+        });
+      } catch (error) {
+        if (runId !== validationRunIdRef.current) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        setValidationState({ status: 'error', message });
+      }
+    },
+    [ensureApiConnection]
+  );
 
   const handleSimulate = async () => {
     const connected = await ensureApiConnection();
@@ -213,6 +223,20 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!hasUserEdited) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void runValidation(code);
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [code, hasUserEdited, runValidation]);
+
   const renderInputLabel = (input: SimulationInput): string => {
     if (input.kind === 'choice') {
       const bounds = input.bounds.map((bound) => `${bound.from}..${bound.to}`).join(', ');
@@ -229,13 +253,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="app__header">
-        <div>
-          <p className="eyebrow">Marlowe Studio</p>
-          <h1>Contract Playground</h1>
-          <p className="subtitle">
-            Draft and test smart contract ideas. Hooked to an API-ready workflow.
-          </p>
-        </div>
+        <h1>Marlowe Studio</h1>
         <div className="header-actions">
           <button className="primary" type="button" onClick={() => setModalOpen(true)}>
             Load example
@@ -272,7 +290,10 @@ export default function App() {
                 language={activeLanguage}
                 theme="vs-dark"
                 value={code}
-                onChange={(value) => setCode(value ?? '')}
+                onChange={(value) => {
+                  setCode(value ?? '');
+                  setHasUserEdited(true);
+                }}
                 options={{
                   fontSize: 14,
                   minimap: { enabled: false },
@@ -286,144 +307,122 @@ export default function App() {
         </section>
 
         <aside className="side-panel">
-          <div className="side-panel__header">
-            <p className="eyebrow">Next up</p>
-            <h2>Simulation Panel</h2>
-            <p className="subtitle">
-              This space will host inputs, validation, and simulation outputs.
-            </p>
-          </div>
-          <div className="side-panel__body">
-            <div className="panel-card">
-              <h3>Inputs</h3>
-              <p>Add parameter controls tied to contract fields.</p>
-            </div>
-            <div className="panel-card">
-              <h3>Validation</h3>
-              <p>Surface schema and logic checks in real-time.</p>
-              <button
-                className="panel-action"
-                type="button"
-                onClick={handleValidate}
-                disabled={apiStatus !== 'connected' || isValidationRunning}
-              >
-                Run validation
-              </button>
-              {validationState.status === 'idle' ? (
-                <p className="panel-result">No validation run yet.</p>
-              ) : null}
-              {validationState.status === 'loading' ? (
-                <p className="panel-result">Validation in progress...</p>
-              ) : null}
-              {validationState.status === 'error' ? (
-                <p className="panel-result panel-result--error">
-                  Validation failed: {validationState.message}
-                </p>
-              ) : null}
-              {validationState.status === 'success' ? (
-                <div className="panel-block">
-                  <div
-                    className={`panel-badge ${
-                      validationState.valid ? 'panel-badge--ok' : 'panel-badge--error'
-                    }`}
-                  >
-                    {validationState.valid ? 'Valid contract' : 'Invalid contract'}
+          <section className="tool-section">
+            <h2>Validation</h2>
+            {validationState.status === 'idle' ? (
+              <p className="panel-result">Validation runs automatically while you type.</p>
+            ) : null}
+            {validationState.status === 'loading' ? (
+              <p className="panel-result">Validation in progress...</p>
+            ) : null}
+            {validationState.status === 'error' ? (
+              <p className="panel-result panel-result--error">
+                Validation failed: {validationState.message}
+              </p>
+            ) : null}
+            {validationState.status === 'success' ? (
+              <div className="panel-block">
+                <div
+                  className={`panel-badge ${
+                    validationState.valid ? 'panel-badge--ok' : 'panel-badge--error'
+                  }`}
+                >
+                  {validationState.valid ? 'Valid contract' : 'Invalid contract'}
+                </div>
+                {validationState.diagnostics.length === 0 ? (
+                  <p className="panel-result">No diagnostics.</p>
+                ) : (
+                  <ul className="panel-list">
+                    {validationState.diagnostics.map((diagnostic, index) => (
+                      <li key={`${diagnostic}-${index}`}>{diagnostic}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </section>
+
+          <section className="tool-section">
+            <h2>Simulation</h2>
+            <button
+              className="panel-action"
+              type="button"
+              onClick={handleSimulate}
+              disabled={apiStatus !== 'connected' || isSimulationRunning}
+            >
+              Run simulation
+            </button>
+            {simulationState.status === 'idle' ? (
+              <p className="panel-result">No simulation run yet.</p>
+            ) : null}
+            {simulationState.status === 'loading' ? (
+              <p className="panel-result">Simulation in progress...</p>
+            ) : null}
+            {simulationState.status === 'error' ? (
+              <p className="panel-result panel-result--error">
+                Simulation failed: {simulationState.message}
+              </p>
+            ) : null}
+            {simulationState.status === 'success' ? (
+              <div className="panel-block">
+                <p className="panel-result">{simulationState.result.summary}</p>
+                {simulationState.result.inputs.length > 0 ? (
+                  <div className="choice-form">
+                    <label className="choice-form__label" htmlFor="input-select">
+                      Available input
+                    </label>
+                    <select
+                      id="input-select"
+                      className="choice-form__select"
+                      value={selectedInputKey}
+                      onChange={(event) => setSelectedInputKey(event.target.value)}
+                    >
+                      {simulationState.result.inputs.map((input) => {
+                        const key = JSON.stringify(input);
+                        return (
+                          <option key={key} value={key}>
+                            {renderInputLabel(input)}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {selectedSimulationInput?.kind === 'choice' ? (
+                      <>
+                        <label className="choice-form__label" htmlFor="choice-value">
+                          Choice value
+                        </label>
+                        <input
+                          id="choice-value"
+                          className="choice-form__input"
+                          value={choiceValue}
+                          onChange={(event) => setChoiceValue(event.target.value)}
+                        />
+                      </>
+                    ) : null}
+                    <button
+                      className="panel-action"
+                      type="button"
+                      disabled={isSimulationRunning || !selectedSimulationInput}
+                      onClick={handleApplyInput}
+                    >
+                      Apply input
+                    </button>
                   </div>
-                  {validationState.diagnostics.length === 0 ? (
-                    <p className="panel-result">No diagnostics.</p>
-                  ) : (
-                    <ul className="panel-list">
-                      {validationState.diagnostics.map((diagnostic, index) => (
-                        <li key={`${diagnostic}-${index}`}>{diagnostic}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ) : null}
-            </div>
-            <div className="panel-card">
-              <h3>Simulation</h3>
-              <p>Preview outcomes and step through required inputs.</p>
-              <button
-                className="panel-action"
-                type="button"
-                onClick={handleSimulate}
-                disabled={apiStatus !== 'connected' || isSimulationRunning}
-              >
-                Run simulation
-              </button>
-              {simulationState.status === 'idle' ? (
-                <p className="panel-result">No simulation run yet.</p>
-              ) : null}
-              {simulationState.status === 'loading' ? (
-                <p className="panel-result">Simulation in progress...</p>
-              ) : null}
-              {simulationState.status === 'error' ? (
-                <p className="panel-result panel-result--error">
-                  Simulation failed: {simulationState.message}
-                </p>
-              ) : null}
-              {simulationState.status === 'success' ? (
-                <div className="panel-block">
-                  <p className="panel-result">{simulationState.result.summary}</p>
-                  {simulationState.result.inputs.length > 0 ? (
-                    <div className="choice-form">
-                      <label className="choice-form__label" htmlFor="input-select">
-                        Available input
-                      </label>
-                      <select
-                        id="input-select"
-                        className="choice-form__select"
-                        value={selectedInputKey}
-                        onChange={(event) => setSelectedInputKey(event.target.value)}
-                      >
-                        {simulationState.result.inputs.map((input) => {
-                          const key = JSON.stringify(input);
-                          return (
-                            <option key={key} value={key}>
-                              {renderInputLabel(input)}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      {selectedSimulationInput?.kind === 'choice' ? (
-                        <>
-                          <label className="choice-form__label" htmlFor="choice-value">
-                            Choice value
-                          </label>
-                          <input
-                            id="choice-value"
-                            className="choice-form__input"
-                            value={choiceValue}
-                            onChange={(event) => setChoiceValue(event.target.value)}
-                          />
-                        </>
-                      ) : null}
-                      <button
-                        className="panel-action"
-                        type="button"
-                        disabled={isSimulationRunning || !selectedSimulationInput}
-                        onClick={handleApplyInput}
-                      >
-                        Apply input
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="panel-badge panel-badge--ok">No further inputs available</div>
-                  )}
-                  {simulationState.result.warnings.length === 0 ? (
-                    <div className="panel-badge panel-badge--ok">No warnings</div>
-                  ) : (
-                    <ul className="panel-list">
-                      {simulationState.result.warnings.map((warning, index) => (
-                        <li key={`${warning}-${index}`}>{warning}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          </div>
+                ) : (
+                  <div className="panel-badge panel-badge--ok">No further inputs available</div>
+                )}
+                {simulationState.result.warnings.length === 0 ? (
+                  <div className="panel-badge panel-badge--ok">No warnings</div>
+                ) : (
+                  <ul className="panel-list">
+                    {simulationState.result.warnings.map((warning, index) => (
+                      <li key={`${warning}-${index}`}>{warning}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </section>
         </aside>
       </main>
 

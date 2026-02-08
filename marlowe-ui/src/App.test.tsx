@@ -1,10 +1,16 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
 vi.mock('@monaco-editor/react', () => ({
-  default: () => <div data-testid="editor" />
+  default: ({ value, onChange }: { value: string; onChange?: (value: string) => void }) => (
+    <textarea
+      data-testid="editor-input"
+      value={value}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  )
 }));
 
 const examples = [
@@ -26,6 +32,7 @@ function mockExamplesFetch(fetchMock: ReturnType<typeof vi.fn>) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -41,7 +48,7 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(await screen.findByTestId('editor')).toBeInTheDocument();
+    expect(await screen.findByTestId('editor-input')).toBeInTheDocument();
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
 
     const user = userEvent.setup();
@@ -63,11 +70,10 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText(/api connection failed: http 503/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /run validation/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /run simulation/i })).toBeDisabled();
   });
 
-  it('runs validation request', async () => {
+  it('auto-validates on editor changes and shows diagnostics', async () => {
     const fetchMock = vi.fn();
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
@@ -75,23 +81,27 @@ describe('App', () => {
       json: async () => ({ openapi: '3.1.0' })
     });
     fetchMock.mockResolvedValueOnce({
-      ok: true,
+      ok: false,
+      status: 400,
       json: async () => ({
-        result: 'ok',
-        success: { contract_yaml: 'x', state: { min_time: '0' }, inputs: [] },
-        error: null
+        result: 'error',
+        error: {
+          subcode: 'INVALID_CONTRACT',
+          message: 'Invalid contract',
+          diagnostics: [{ message: 'Expected Close but found malformed when' }]
+        }
       })
     });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
-    expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /run validation/i })).toBeEnabled();
+    const input = await screen.findByTestId('editor-input');
 
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /run validation/i }));
+    fireEvent.change(input, { target: { value: 'edited-contract' } });
+    await new Promise((resolve) => setTimeout(resolve, 700));
 
-    expect(await screen.findByText('Valid contract')).toBeInTheDocument();
+    expect(await screen.findByText('Invalid contract')).toBeInTheDocument();
+    expect(await screen.findByText('Expected Close but found malformed when')).toBeInTheDocument();
   });
 
   it('progresses to the next choice after applying the first input', async () => {

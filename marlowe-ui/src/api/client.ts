@@ -110,18 +110,38 @@ const JSON_HEADERS = {
   'Content-Type': 'application/json'
 };
 
-async function postJson<T>(url: string, payload: Record<string, unknown>): Promise<T> {
+type JsonResponse<T> = {
+  ok: boolean;
+  status: number;
+  data: T | null;
+};
+
+async function requestJson<T>(
+  url: string,
+  payload: Record<string, unknown>
+): Promise<JsonResponse<T>> {
   const response = await fetch(url, {
     method: 'POST',
     headers: JSON_HEADERS,
     body: JSON.stringify(payload)
   });
 
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status})`);
+  let data: T | null = null;
+  try {
+    data = (await response.json()) as T;
+  } catch {
+    data = null;
   }
 
-  return (await response.json()) as T;
+  return {
+    ok: response.ok,
+    status: response.status,
+    data
+  };
+}
+
+function statusError(status: number): Error {
+  return new Error(`Request failed (${status})`);
 }
 
 function getChoiceName(id: Record<string, unknown>): string {
@@ -190,17 +210,21 @@ function getMinTime(state: Record<string, unknown> | null | undefined): string {
 }
 
 export async function validateContract(code: string): Promise<ValidationResponse> {
-  const response = await postJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
+  const response = await requestJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
     contract_yaml: code,
     interval_start: '0',
     interval_end: '0'
   });
 
-  if (response.error) {
+  if (response.data?.error) {
     return {
       valid: false,
-      diagnostics: mapPreviewErrorToMessages(response.error)
+      diagnostics: mapPreviewErrorToMessages(response.data.error)
     };
+  }
+
+  if (!response.ok) {
+    throw statusError(response.status);
   }
 
   return {
@@ -214,17 +238,17 @@ export async function simulateContract(
   state: Record<string, unknown> | null = null
 ): Promise<SimulationResponse> {
   const minTime = getMinTime(state);
-  const response = await postJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
+  const response = await requestJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
     contract_yaml: contractYaml,
     interval_start: minTime,
     interval_end: minTime,
     state: state ?? undefined
   });
 
-  if (response.error) {
-    const warnings = mapPreviewErrorToMessages(response.error);
+  if (response.data?.error) {
+    const warnings = mapPreviewErrorToMessages(response.data.error);
     return {
-      summary: `Preview failed (${response.error.subcode})`,
+      summary: `Preview failed (${response.data.error.subcode})`,
       warnings,
       inputs: [],
       context: {
@@ -235,14 +259,18 @@ export async function simulateContract(
     };
   }
 
-  const nextState = response.success?.state ?? state;
-  const nextInputs = mapPreviewInputs(response.success?.inputs ?? []);
+  if (!response.ok || !response.data) {
+    throw statusError(response.status);
+  }
+
+  const nextState = response.data.success?.state ?? state;
+  const nextInputs = mapPreviewInputs(response.data.success?.inputs ?? []);
   return {
     summary: `Preview succeeded with ${nextInputs.length} available input(s)`,
     warnings: [],
     inputs: nextInputs,
     context: {
-      contractYaml: response.success?.contract_yaml ?? contractYaml,
+      contractYaml: response.data.success?.contract_yaml ?? contractYaml,
       state: nextState,
       minTime: getMinTime(nextState)
     }
@@ -276,7 +304,7 @@ export async function simulateStep(
     inputPayload = 'notify';
   }
 
-  const response = await postJson<ApiSimulateStepResponse>('/api/simulate/step', {
+  const response = await requestJson<ApiSimulateStepResponse>('/api/simulate/step', {
     contract_yaml: context.contractYaml,
     state: context.state ?? undefined,
     transaction: {
@@ -286,18 +314,22 @@ export async function simulateStep(
     }
   });
 
-  if (response.error) {
-    throw new Error(response.error.message);
+  if (response.data?.error) {
+    throw new Error(response.data.error.message);
+  }
+
+  if (!response.ok || !response.data) {
+    throw statusError(response.status);
   }
 
   const warningCodes =
-    response.success?.warnings?.map((warning) => warning.code ?? 'Warning') ?? [];
-  const nextState = response.success?.state ?? context.state;
+    response.data.success?.warnings?.map((warning) => warning.code ?? 'Warning') ?? [];
+  const nextState = response.data.success?.state ?? context.state;
   return {
     summary: 'Simulation step applied',
     warnings: warningCodes,
     context: {
-      contractYaml: response.success?.contract_yaml ?? context.contractYaml,
+      contractYaml: response.data.success?.contract_yaml ?? context.contractYaml,
       state: nextState,
       minTime: getMinTime(nextState)
     }

@@ -32,6 +32,27 @@ describe('api client', () => {
     });
   });
 
+  it('returns detailed diagnostics for 400 validation responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        result: 'error',
+        error: {
+          subcode: 'INVALID_CONTRACT',
+          message: 'Invalid contract',
+          diagnostics: [{ message: 'Bad token at line 4' }]
+        }
+      })
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await validateContract('bad-contract');
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toEqual(['Bad token at line 4']);
+  });
+
   it('extracts choice/deposit/notify inputs from preview', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
