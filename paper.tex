@@ -12,6 +12,7 @@
 \usepackage{enumitem}
 \usepackage{xurl}
 \usepackage[hidelinks]{hyperref}
+\usepackage{fvextra}
 
 \setstretch{1.05}
 \setlist[itemize]{leftmargin=1.5em}
@@ -174,11 +175,20 @@ Vite Team. \emph{Vite Documentation}.\newline
 
 \appendix
 \section{Reproducibility Artifacts}
-A complete prompt and commit appendix is available in:
-\begin{itemize}
-  \item \url{https://github.com/shmish111/codex-marlowe-rust/blob/main/APPENDIX_PROMPTS_AND_COMMITS.md}
-\end{itemize}
+This appendix embeds the raw reproducibility logs used in this report.
 
-For review readability, the full logs are kept as a separate artifact rather than embedded directly in this PDF.
+\subsection{Prompt Log (timestamp + session\_id + prompt)}
+\VerbatimInput[
+  breaklines=true,
+  breakanywhere=true,
+  fontsize=\scriptsize
+]{appendix_prompts.tsv}
+
+\subsection{Commit Log (timestamp + commit\_id + subject)}
+\VerbatimInput[
+  breaklines=true,
+  breakanywhere=true,
+  fontsize=\scriptsize
+]{appendix_commits.tsv}
 
 \end{document}
