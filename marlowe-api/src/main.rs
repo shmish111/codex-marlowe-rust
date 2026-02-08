@@ -16,9 +16,7 @@ async fn main() {
 
     println!("listening on http://127.0.0.1:3000");
 
-    axum::serve(listener, app)
-        .await
-        .expect("server failed");
+    axum::serve(listener, app).await.expect("server failed");
 }
 
 async fn health_handler() -> Json<HealthResponse> {
