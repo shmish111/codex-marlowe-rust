@@ -180,6 +180,7 @@ pub struct SimulateSuccessResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SimulateErrorResponse {
     pub code: String,
+    pub subcode: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
@@ -341,6 +342,7 @@ pub async fn simulate_step_handler(
         Ok(contract) => contract,
         Err(err) => {
             return bad_request(
+                "RequestError",
                 "ParseError",
                 format!("{}: {}", err.path, err.message),
                 Some(err.path),
@@ -397,6 +399,7 @@ pub async fn simulate_step_handler(
             });
         }
         return bad_request(
+            "ValidationError",
             "NotReadyToRun",
             "contract must be fully instantiated and type-safe before simulation".to_owned(),
             Some("$.contract_yaml".to_owned()),
@@ -407,7 +410,13 @@ pub async fn simulate_step_handler(
     let state = match map_state_request(request.state) {
         Ok(state) => state,
         Err(message) => {
-            return bad_request("StateError", message, Some("$.state".to_owned()), None)
+            return bad_request(
+                "RequestError",
+                "StateError",
+                message,
+                Some("$.state".to_owned()),
+                None,
+            )
         }
     };
 
@@ -415,6 +424,7 @@ pub async fn simulate_step_handler(
         Ok(transaction) => transaction,
         Err(message) => {
             return bad_request(
+                "RequestError",
                 "TransactionError",
                 message,
                 Some("$.transaction".to_owned()),
@@ -443,6 +453,7 @@ pub async fn simulate_step_handler(
             (StatusCode::OK, Json(response))
         }
         SimTransactionResult::Error(err) => bad_request(
+            "SimulationError",
             &sim_error_code(&err),
             sim_error_message(&err),
             sim_error_path(&err),
@@ -470,6 +481,7 @@ pub async fn simulate_preview_handler(
         Ok(contract) => contract,
         Err(err) => {
             return preview_bad_request(
+                "RequestError",
                 "ParseError",
                 format!("{}: {}", err.path, err.message),
                 Some(err.path),
@@ -526,6 +538,7 @@ pub async fn simulate_preview_handler(
             });
         }
         return preview_bad_request(
+            "ValidationError",
             "NotReadyToRun",
             "contract must be fully instantiated and type-safe before simulation".to_owned(),
             Some("$.contract_yaml".to_owned()),
@@ -536,13 +549,20 @@ pub async fn simulate_preview_handler(
     let state = match map_state_request(request.state) {
         Ok(state) => state,
         Err(message) => {
-            return preview_bad_request("StateError", message, Some("$.state".to_owned()), None)
+            return preview_bad_request(
+                "RequestError",
+                "StateError",
+                message,
+                Some("$.state".to_owned()),
+                None,
+            )
         }
     };
     let interval_start = match request.interval_start.into_bigint() {
         Ok(value) => value,
         Err(message) => {
             return preview_bad_request(
+                "RequestError",
                 "TransactionError",
                 message,
                 Some("$.interval_start".to_owned()),
@@ -554,6 +574,7 @@ pub async fn simulate_preview_handler(
         Ok(value) => value,
         Err(message) => {
             return preview_bad_request(
+                "RequestError",
                 "TransactionError",
                 message,
                 Some("$.interval_end".to_owned()),
@@ -589,6 +610,7 @@ pub async fn simulate_preview_handler(
             )
         }
         Err(err) => preview_bad_request(
+            "SimulationError",
             &sim_error_code(&err),
             sim_error_message(&err),
             sim_error_path(&err),
@@ -751,6 +773,7 @@ fn preview_input_to_response(input: &PreviewInput) -> PreviewInputResponse {
 
 fn bad_request(
     code: &str,
+    subcode: &str,
     message: String,
     path: Option<String>,
     diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
@@ -762,6 +785,7 @@ fn bad_request(
             success: None,
             error: Some(SimulateErrorResponse {
                 code: code.to_owned(),
+                subcode: subcode.to_owned(),
                 message,
                 path,
                 diagnostics,
@@ -778,6 +802,7 @@ fn internal_error(message: String) -> (StatusCode, Json<SimulateStepResponse>) {
             success: None,
             error: Some(SimulateErrorResponse {
                 code: "InternalError".to_owned(),
+                subcode: "InternalError".to_owned(),
                 message,
                 path: None,
                 diagnostics: None,
@@ -788,6 +813,7 @@ fn internal_error(message: String) -> (StatusCode, Json<SimulateStepResponse>) {
 
 fn preview_bad_request(
     code: &str,
+    subcode: &str,
     message: String,
     path: Option<String>,
     diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
@@ -799,6 +825,7 @@ fn preview_bad_request(
             success: None,
             error: Some(SimulateErrorResponse {
                 code: code.to_owned(),
+                subcode: subcode.to_owned(),
                 message,
                 path,
                 diagnostics,
@@ -815,6 +842,7 @@ fn preview_internal_error(message: String) -> (StatusCode, Json<SimulatePreviewR
             success: None,
             error: Some(SimulateErrorResponse {
                 code: "InternalError".to_owned(),
+                subcode: "InternalError".to_owned(),
                 message,
                 path: None,
                 diagnostics: None,

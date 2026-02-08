@@ -594,6 +594,7 @@
         "type": "object",
         "required": [
           "code",
+          "subcode",
           "message"
         ],
         "properties": {
@@ -617,6 +618,9 @@
               "string",
               "null"
             ]
+          },
+          "subcode": {
+            "type": "string"
           }
         }
       },

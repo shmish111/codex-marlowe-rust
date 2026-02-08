@@ -142,7 +142,8 @@ async fn simulate_step_rejects_uninstantiated_contract() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
-    assert_eq!(json["error"]["code"], "NotReadyToRun");
+    assert_eq!(json["error"]["code"], "ValidationError");
+    assert_eq!(json["error"]["subcode"], "NotReadyToRun");
     assert_eq!(json["error"]["path"], "$.contract_yaml");
     assert!(json["error"]["diagnostics"].is_array());
     assert!(json["error"]["diagnostics"]
@@ -178,7 +179,8 @@ async fn simulate_step_rejects_ambiguous_interval() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
-    assert_eq!(json["error"]["code"], "AmbiguousTimeInterval");
+    assert_eq!(json["error"]["code"], "SimulationError");
+    assert_eq!(json["error"]["subcode"], "AmbiguousTimeInterval");
     assert_eq!(json["error"]["path"], "$.transaction");
 }
 
@@ -232,7 +234,8 @@ When:
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
-    assert_eq!(json["error"]["code"], "NoMatchForInput");
+    assert_eq!(json["error"]["code"], "SimulationError");
+    assert_eq!(json["error"]["subcode"], "NoMatchForInput");
     assert_eq!(json["error"]["path"], "$.transaction.inputs[0]");
 }
 
@@ -364,7 +367,8 @@ When:
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
-    assert_eq!(json["error"]["code"], "NotReadyToRun");
+    assert_eq!(json["error"]["code"], "ValidationError");
+    assert_eq!(json["error"]["subcode"], "NotReadyToRun");
     assert_eq!(json["error"]["path"], "$.contract_yaml");
     assert!(json["error"]["diagnostics"].is_array());
 }
