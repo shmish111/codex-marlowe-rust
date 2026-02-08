@@ -7,9 +7,11 @@
 
 pub mod ast;
 pub mod parser;
+pub mod serializer;
 pub mod typecheck;
 
 pub use parser::{parse_contract_yaml, ParseError};
+pub use serializer::{contract_to_yaml, contract_to_yaml_string};
 pub use typecheck::{
     type_check, ChoiceRef, Diagnostic, PartyRef, TokenRef, TypeCheckContext, TypeCheckResult,
 };
