@@ -120,6 +120,103 @@ async fn typecheck_explain_rejects_parse_errors() {
 }
 
 #[tokio::test]
+async fn typecheck_explain_applies_strict_context_definitions() {
+    let app = build_router();
+    let contract = r#"
+Pay:
+  from: { Role: "alice" }
+  to_party: { Role: "bob" }
+  token: { Token: { currency_symbol: "", token_name: "" } }
+  amount: { Constant: 1 }
+  then: { Close: {} }
+"#;
+
+    let strict_without_defs = json!({
+      "contract_yaml": contract,
+      "context": {
+        "require_known_definitions": true
+      }
+    });
+    let fail_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/typecheck/explain")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(strict_without_defs.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(fail_response.status(), StatusCode::OK);
+    let fail_json = json_response(fail_response).await;
+    assert_eq!(fail_json["success"]["ready_to_run"], false);
+    assert!(
+        fail_json["success"]["summary"]["error_count"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+
+    let strict_with_defs = json!({
+      "contract_yaml": contract,
+      "context": {
+        "require_known_definitions": true,
+        "known_accounts": [{"Role": "alice"}],
+        "known_parties": [{"Role": "bob"}],
+        "known_tokens": [{"Token": {"currency_symbol": "", "token_name": ""}}]
+      }
+    });
+    let pass_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/typecheck/explain")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(strict_with_defs.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(pass_response.status(), StatusCode::OK);
+    let pass_json = json_response(pass_response).await;
+    assert_eq!(pass_json["success"]["ready_to_run"], true);
+    assert_eq!(pass_json["success"]["summary"]["blocking_count"], 0);
+}
+
+#[tokio::test]
+async fn typecheck_explain_rejects_non_concrete_context_values() {
+    let app = build_router();
+    let request_body = json!({
+      "contract_yaml": "Close: {}",
+      "context": {
+        "known_accounts": [{"Hole": "acct"}]
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/typecheck/explain")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["error"]["code"], "RequestError");
+    assert_eq!(json["error"]["subcode"], "ContextError");
+    assert_eq!(json["error"]["path"], "$.context.known_accounts[0]");
+}
+
+#[tokio::test]
 async fn cors_header_is_returned_for_origin_request() {
     let app = build_router();
     let response = app

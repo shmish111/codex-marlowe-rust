@@ -19,7 +19,7 @@ use crate::{
         SimError, SimInput, SimState, SimTransaction, SimTransactionResult, StateDelta,
         TraceReduceRule, TraceStep, TransactionWarning,
     },
-    type_check, TypeCheckContext,
+    type_check, ChoiceRef, PartyRef, TokenRef, TypeCheckContext,
 };
 
 #[derive(Clone, Default)]
@@ -397,6 +397,22 @@ pub struct PreviewBoundResponse {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct TypecheckExplainRequest {
     pub contract_yaml: String,
+    #[serde(default)]
+    pub context: TypecheckExplainContextRequest,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct TypecheckExplainContextRequest {
+    #[serde(default)]
+    pub require_known_definitions: bool,
+    #[serde(default)]
+    pub known_accounts: Vec<Party>,
+    #[serde(default)]
+    pub known_parties: Vec<Party>,
+    #[serde(default)]
+    pub known_tokens: Vec<Token>,
+    #[serde(default)]
+    pub known_choices: Vec<ChoiceId>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -470,6 +486,7 @@ pub struct TypecheckExplainItemResponse {
             PreviewInputResponse,
             PreviewBoundResponse,
             TypecheckExplainRequest,
+            TypecheckExplainContextRequest,
             TypecheckExplainResponse,
             TypecheckExplainSuccessResponse,
             TypecheckExplainSummaryResponse,
@@ -816,6 +833,19 @@ pub async fn typecheck_explain_handler(
     _state: State<AppState>,
     Json(request): Json<TypecheckExplainRequest>,
 ) -> (StatusCode, Json<TypecheckExplainResponse>) {
+    let context = match map_typecheck_context_request(&request.context) {
+        Ok(context) => context,
+        Err(err) => {
+            return typecheck_explain_bad_request(
+                "RequestError",
+                "ContextError",
+                err.message,
+                Some(err.path),
+                None,
+            )
+        }
+    };
+
     let contract = match parse_contract_yaml(&request.contract_yaml) {
         Ok(contract) => contract,
         Err(err) => {
@@ -829,7 +859,7 @@ pub async fn typecheck_explain_handler(
         }
     };
 
-    let validation = type_check(&contract, &TypeCheckContext::default());
+    let validation = type_check(&contract, &context);
     let error_count = validation.errors.len();
     let hole_count = validation.holes.len();
     let param_count = validation.params.len();
@@ -1237,6 +1267,95 @@ fn preview_input_to_response(input: &PreviewInput) -> PreviewInputResponse {
             can_notify: *can_notify,
             warnings: Vec::new(),
         },
+    }
+}
+
+struct ContextMapError {
+    path: String,
+    message: String,
+}
+
+fn map_typecheck_context_request(
+    request: &TypecheckExplainContextRequest,
+) -> Result<TypeCheckContext, ContextMapError> {
+    let mut known_accounts = std::collections::HashSet::new();
+    for (idx, party) in request.known_accounts.iter().enumerate() {
+        known_accounts.insert(party_ref_from_request(
+            party,
+            &format!("$.context.known_accounts[{idx}]"),
+        )?);
+    }
+
+    let mut known_parties = std::collections::HashSet::new();
+    for (idx, party) in request.known_parties.iter().enumerate() {
+        known_parties.insert(party_ref_from_request(
+            party,
+            &format!("$.context.known_parties[{idx}]"),
+        )?);
+    }
+
+    let mut known_tokens = std::collections::HashSet::new();
+    for (idx, token) in request.known_tokens.iter().enumerate() {
+        known_tokens.insert(token_ref_from_request(
+            token,
+            &format!("$.context.known_tokens[{idx}]"),
+        )?);
+    }
+
+    let mut known_choices = std::collections::HashSet::new();
+    for (idx, choice) in request.known_choices.iter().enumerate() {
+        known_choices.insert(choice_ref_from_request(
+            choice,
+            &format!("$.context.known_choices[{idx}]"),
+        )?);
+    }
+
+    Ok(TypeCheckContext {
+        known_accounts,
+        known_parties,
+        known_tokens,
+        known_choices,
+        require_known_definitions: request.require_known_definitions,
+    })
+}
+
+fn party_ref_from_request(party: &Party, path: &str) -> Result<PartyRef, ContextMapError> {
+    match party {
+        Party::Role(name) => Ok(PartyRef::Role(name.clone())),
+        Party::Address(name) => Ok(PartyRef::Address(name.clone())),
+        Party::Hole(name) => Err(ContextMapError {
+            path: path.to_owned(),
+            message: format!("context definitions must be concrete; found hole '?{name}'"),
+        }),
+    }
+}
+
+fn token_ref_from_request(token: &Token, path: &str) -> Result<TokenRef, ContextMapError> {
+    match token {
+        Token::Token {
+            currency_symbol,
+            token_name,
+        } => Ok(TokenRef {
+            currency_symbol: currency_symbol.clone(),
+            token_name: token_name.clone(),
+        }),
+        Token::Hole(name) => Err(ContextMapError {
+            path: path.to_owned(),
+            message: format!("context definitions must be concrete; found token hole '?{name}'"),
+        }),
+    }
+}
+
+fn choice_ref_from_request(choice: &ChoiceId, path: &str) -> Result<ChoiceRef, ContextMapError> {
+    match choice {
+        ChoiceId::ChoiceId { name, party } => Ok(ChoiceRef {
+            name: name.clone(),
+            party: party_ref_from_request(party, &format!("{path}.party"))?,
+        }),
+        ChoiceId::Hole(name) => Err(ContextMapError {
+            path: path.to_owned(),
+            message: format!("context definitions must be concrete; found choice hole '?{name}'"),
+        }),
     }
 }
 

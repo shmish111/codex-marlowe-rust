@@ -1231,6 +1231,38 @@
           }
         }
       },
+      "TypecheckExplainContextRequest": {
+        "type": "object",
+        "properties": {
+          "known_accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Party"
+            }
+          },
+          "known_choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChoiceId"
+            }
+          },
+          "known_parties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Party"
+            }
+          },
+          "known_tokens": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Token"
+            }
+          },
+          "require_known_definitions": {
+            "type": "boolean"
+          }
+        }
+      },
       "TypecheckExplainItemResponse": {
         "type": "object",
         "required": [
@@ -1263,6 +1295,9 @@
           "contract_yaml"
         ],
         "properties": {
+          "context": {
+            "$ref": "#/components/schemas/TypecheckExplainContextRequest"
+          },
           "contract_yaml": {
             "type": "string"
           }
