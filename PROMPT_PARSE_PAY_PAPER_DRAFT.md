@@ -30,8 +30,8 @@ This is a useful pattern: failed AI runs can function as expensive but effective
 
 The analysis uses:
 
-- Git commit history from `/Users/davidsmith/code/codex-marlowe-rust`.
-- Project documentation in `/Users/davidsmith/code/codex-marlowe-rust/README.md` and `/Users/davidsmith/code/codex-marlowe-rust/marlowe-api/README.md`.
+- Git commit history from `https://github.com/shmish111/codex-marlowe-rust`.
+- Project documentation in `https://github.com/shmish111/codex-marlowe-rust/blob/main/README.md` and `https://github.com/shmish111/codex-marlowe-rust/blob/main/marlowe-api/README.md`.
 - Local Codex artifacts (available but incomplete/noisy) for process context.
 
 ### 3.3 Coordination model

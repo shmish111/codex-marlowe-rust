@@ -3,7 +3,7 @@
 This appendix is a raw extract from local Codex session files and git history.
 
 - Prompt source: `/Users/davidsmith/.codex/sessions/2026/02/08/*.jsonl`
-- Commit source: `git log` in `/Users/davidsmith/code/codex-marlowe-rust`
+- Commit source: `git log` in `https://github.com/shmish111/codex-marlowe-rust`
 - Timestamps are UTC (`Z` or `+00:00`).
 
 ## A. Prompt Log (timestamp + session_id + prompt)

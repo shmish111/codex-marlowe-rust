@@ -1,0 +1,184 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+
+\setstretch{1.05}
+\setlist[itemize]{leftmargin=1.5em}
+\setlist[enumerate]{leftmargin=1.5em}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection.}{0.5em}{}
+
+\title{Prompt, Parse, Pay: Rebuilding Marlowe Playground with AI in a Single Session}
+\author{David Smith \and Codex (GPT-5.3-Codex)}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This paper reports a single-session software sprint in which a developer who did not write or read code (David Smith) collaborated with an AI coding agent (Codex) to produce a working reinterpretation of Marlowe Playground in Rust and React. The session produced parser/type-checker infrastructure, simulation semantics, an HTTP API with generated OpenAPI, and a browser-based editing and simulation UI. Evidence is taken from repository history and project documentation. The implementation history shows 49 commits over 4h 11m 41s on 2026-02-08, including substantial testing-oriented work (property tests, fuzz harnesses, mutation configuration, regression fixtures) and iterative UX refinement in Monaco-based diagnostics. The results are encouraging and mildly alarming for the author's future job prospects: AI-assisted development can rapidly produce coherent systems across backend and frontend layers, while leaving the human operator with limited direct understanding of internal code quality. We present quantitative observations, process notes from three prior failed attempts, and a risk framing for teams considering similar workflows.
+\end{abstract}
+
+\section{Introduction}
+Marlowe is a domain-specific language for financial contracts on Cardano, with established tooling and educational resources~\cite{cardano-marlowe,marlowe-cardano}. The production Marlowe ecosystem on Cardano was not built through this AI-assisted workflow and is engineered to a substantially higher robustness bar, including rigorous methods and formal treatment in its broader research and implementation context~\cite{cardano-marlowe,marlowe-cardano}. This project aimed to build a reinterpretation of Marlowe Playground as a local, full-stack developer environment, with emphasis on contract authoring, validation, and step-wise simulation. As a playground-oriented tool, its primary goal is interactive exploration rather than claiming production-grade formal completeness.
+
+The notable process constraint was social rather than technical: the human collaborator (David Smith) contributed prompting strategy and manual test execution, but did not write code and did not read the code at all. The AI agent produced implementation changes throughout a single concentrated session. A second constraint is background: the human collaborator had never written more than a ``hello world'' application in Rust before this project. A third constraint is verification asymmetry: the human collaborator did not manually test backend behavior and relied on automated checks and UI-observed outcomes.
+
+The central question is not whether the system can be built this way (it can), but whether this style of success should be considered robust engineering or fast, plausible theater with excellent demos.
+
+\section{Prior Attempts and Setup}
+Before the successful sprint reported here, three previous attempts were made with OpenCode + Kimi 2.5 targeting a Haskell backend. Those attempts were slower and repeatedly stalled on frontend integration issues. Despite being unsuccessful, they provided practical constraints that improved this run:
+
+\begin{itemize}
+  \item Prior failures established that \texttt{monaco-yaml} integration with React + Vite was costly and brittle in this context.
+  \item Prior failures also clarified that backend and frontend work can proceed in parallel if a stable \texttt{openapi.json} contract is defined early.
+  \item The successful run therefore adopted a simpler Monaco integration with explicit diagnostics plumbing from API responses.
+\end{itemize}
+
+This is a useful pattern: failed AI runs can function as expensive but effective prompt engineering.
+
+\section{Method}
+\subsection{Data sources}
+The analysis uses:
+
+\begin{itemize}
+  \item Git commit history from \url{https://github.com/shmish111/codex-marlowe-rust}.
+  \item Project documentation in \url{https://github.com/shmish111/codex-marlowe-rust/blob/main/README.md} and \url{https://github.com/shmish111/codex-marlowe-rust/blob/main/marlowe-api/README.md}.
+  \item Local Codex artifacts (available but incomplete/noisy) for process context.
+\end{itemize}
+
+\subsection{Coordination model}
+Execution used two concurrent Codex sessions: one focused on frontend and one focused on backend. When frontend work required backend changes, the frontend session generated explicit instructions for the backend session; after backend implementation, the backend session returned a concise change summary for the frontend session. This relay protocol acted as a lightweight interface contract between two model threads.
+
+\subsection{Session boundaries and quantitative summary}
+From repository history:
+
+\begin{itemize}
+  \item First commit: 2026-02-08 18:35:09 +0000
+  \item Latest commit in sprint window: 2026-02-08 22:46:50 +0000
+  \item Duration: 4h 11m 41s
+  \item Total commits: 49
+  \item Mean commit rate: 11.68 commits/hour
+\end{itemize}
+
+A coarse phase breakdown from commit subjects:
+\begin{enumerate}
+  \item \textbf{Language + correctness foundation} (early phase): parser/type checker, serialization, and heavy testing additions.
+  \item \textbf{Execution semantics + API surface} (middle phase): strict simulator core, \texttt{/simulate/step}, \texttt{/simulate/preview}, OpenAPI generation/serving, typed error payloads.
+  \item \textbf{UI integration + diagnostics polish} (late phase): API wiring, stateful stepping, autovalidation, source-span-driven Monaco markers, and validation gating.
+\end{enumerate}
+
+\section{System Outcome}
+The resulting system includes the expected Marlowe-playground-style loop: edit contract, validate, preview possible inputs, execute step, inspect resulting state.
+
+\subsection{Backend capabilities (Rust API)}
+Per project documentation, implemented backend features include:
+\begin{itemize}
+  \item Extended Marlowe YAML parse/serialize and type-checking with hole/parameter inference.
+  \item Structural and semantic diagnostics, including unresolved holes vs unresolved parameters.
+  \item Transaction simulation with interval rules and warning reporting.
+  \item Preview endpoint for available quiescent inputs and warnings.
+  \item Explain endpoint for grouped diagnostics and remediation hints.
+  \item OpenAPI generation from handlers and serving at \texttt{/openapi.json}.
+\end{itemize}
+
+\subsection{Frontend capabilities (React + Monaco)}
+Implemented frontend capabilities include:
+\begin{itemize}
+  \item Monaco editor for YAML contracts.
+  \item Example contract loader.
+  \item Debounced autovalidation.
+  \item Inline diagnostics with source-span placement.
+  \item Simulation panel gating based on validation readiness.
+  \item Stateful step-by-step simulation interactions.
+\end{itemize}
+
+\section{Why This Run Worked}
+Four practical factors appear to explain the improvement over prior attempts:
+\begin{enumerate}
+  \item \textbf{Error-shape stability.} Structured subcodes and typed payloads reduced frontend ambiguity and made marker rendering predictable.
+  \item \textbf{API contract-first parallelization.} Early \texttt{openapi.json} availability allowed frontend and backend work to proceed in parallel with lower integration friction.
+  \item \textbf{Two-session relay coordination.} Dedicated frontend/backend Codex sessions exchanged explicit change requests and concise implementation summaries, reducing cross-layer ambiguity.
+  \item \textbf{Testing density as control.} The commit stream shows disproportionate investment in tests/harnesses early, which likely reduced semantic drift later.
+\end{enumerate}
+
+In plain terms, the process behaved less like ``generate an app'' and more like ``run two specialized model teams connected by a strict API and handoff notes.''
+
+\section{Risks, Limitations, and the ``Do Not Try This at Work'' Section}
+The most important negative result is epistemic: the human operator can ship a sophisticated system while not knowing whether it is maintainable, secure, or subtly wrong.
+
+Primary risks:
+\begin{itemize}
+  \item \textbf{Unknown correctness boundary.} Passing tests do not define full semantic coverage for financial contracts.
+  \item \textbf{Maintainability debt.} If only the model understands architecture-level rationale, future human changes become fragile.
+  \item \textbf{Over-trust transfer.} Rapid visible progress can be mistaken for verified robustness.
+  \item \textbf{Operational ambiguity.} Ownership and incident response are unclear when authorship is hybrid and code comprehension is asymmetric.
+\end{itemize}
+
+Recommended mitigations for real teams:
+\begin{itemize}
+  \item Require human code-reading checkpoints for each subsystem.
+  \item Add explicit threat modeling and property coverage audits.
+  \item Track test quality metrics, not just test count.
+  \item Budget refactoring time after AI sprint completion.
+\end{itemize}
+
+The slogan version remains accurate: AI can do this; the safety question is whether anyone can responsibly operate what it produced.
+
+\section{Authorship and Accountability Note}
+This draft attributes authorship to \textbf{David Smith and Codex (GPT-5.3-Codex)}. Contribution split in this case:
+
+\begin{itemize}
+  \item David Smith: goals, constraints, prompting strategy, cross-session FE/BE relay coordination, manual test execution, acceptance decisions.
+  \item Codex: code generation, iterative refactoring, endpoint/UI integration, diagnostics plumbing.
+\end{itemize}
+
+Accountability should not be delegated to the model. In professional settings, humans still own release decisions, risk acceptance, and maintenance plans.
+
+\section{Conclusion}
+A functional reinterpretation of Marlowe Playground was produced in one session with high apparent velocity and strong feature completeness. The outcome demonstrates that AI-assisted coding can cross backend/frontend boundaries effectively under tight iteration loops. It also demonstrates a governance problem: successful output can outpace human understanding. Future work should treat this gap as a first-class engineering concern, not a footnote.
+
+\section*{References}
+\begin{thebibliography}{9}
+\bibitem{cardano-marlowe}
+Cardano Developer Portal. \emph{Marlowe: Smart contract resources}.\newline
+\url{https://docs.cardano.org/developer-resources/smart-contracts/marlowe/}
+
+\bibitem{marlowe-cardano}
+Input Output. \emph{marlowe-cardano repository}.\newline
+\url{https://github.com/input-output-hk/marlowe-cardano}
+
+\bibitem{monaco}
+Microsoft. \emph{Monaco Editor Documentation}.\newline
+\url{https://microsoft.github.io/monaco-editor/}
+
+\bibitem{react}
+React Team. \emph{React Documentation}.\newline
+\url{https://react.dev/}
+
+\bibitem{vite}
+Vite Team. \emph{Vite Documentation}.\newline
+\url{https://vite.dev/}
+\end{thebibliography}
+
+\appendix
+\section{Reproducibility Artifacts}
+A complete prompt and commit appendix is available in:
+\begin{itemize}
+  \item \url{https://github.com/shmish111/codex-marlowe-rust/blob/main/APPENDIX_PROMPTS_AND_COMMITS.md}
+\end{itemize}
+
+For review readability, the full logs are kept as a separate artifact rather than embedded directly in this PDF.
+
+\end{document}
