@@ -7,6 +7,7 @@ export type ValidationDiagnostic = {
   endColumn?: number;
   code?: string;
   subcode?: string;
+  details?: Record<string, unknown>;
 };
 
 export type ValidationResponse = {
@@ -200,7 +201,8 @@ function mapPreviewErrorToDiagnostics(
       endLine: item.end_line,
       endColumn: item.end_column,
       code: item.code,
-      subcode: item.subcode
+      subcode: item.subcode,
+      details: item.details
     }));
   }
 

@@ -28,6 +28,65 @@ type SimulationState =
   | { status: 'success'; result: SimulationResponse }
   | { status: 'error'; message: string };
 
+type UnresolvedHole = {
+  name: string;
+  expectedType?: string;
+};
+
+function getDetailString(diagnostic: ValidationDiagnostic, key: string): string | undefined {
+  const value = diagnostic.details?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function normalizeHoleName(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return value.startsWith('?') ? value : `?${value}`;
+}
+
+function getHoleName(diagnostic: ValidationDiagnostic): string | undefined {
+  const detailName = normalizeHoleName(getDetailString(diagnostic, 'name'));
+  if (detailName) {
+    return detailName;
+  }
+
+  const fromMessage =
+    diagnostic.message.match(/\?([A-Za-z_][A-Za-z0-9_]*)/)?.[1] ??
+    diagnostic.message.match(/parameter ['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/i)?.[1];
+  if (fromMessage) {
+    return normalizeHoleName(fromMessage);
+  }
+
+  const fromPath = diagnostic.path?.match(/\?([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+  return normalizeHoleName(fromPath);
+}
+
+function getExpectedType(diagnostic: ValidationDiagnostic): string | undefined {
+  const detailType = getDetailString(diagnostic, 'type');
+  if (detailType) {
+    return detailType;
+  }
+
+  const fromMessage =
+    diagnostic.message.match(/inferred type ([A-Za-z_][A-Za-z0-9_]*)/i)?.[1] ??
+    diagnostic.message.match(/\btype:\s*([A-Za-z_][A-Za-z0-9_]*)/i)?.[1];
+  return fromMessage;
+}
+
+function isHoleDiagnostic(diagnostic: ValidationDiagnostic): boolean {
+  if (getHoleName(diagnostic)) {
+    return true;
+  }
+
+  const subcode = diagnostic.subcode?.toLowerCase() ?? '';
+  if (subcode.includes('param') || subcode.includes('hole') || subcode.includes('unresolved')) {
+    return true;
+  }
+
+  return diagnostic.message.toLowerCase().includes('must be instantiated');
+}
+
 export default function App() {
   const [isModalOpen, setModalOpen] = useState(false);
   const [selectedExample, setSelectedExample] = useState<Example | null>(null);
@@ -204,6 +263,55 @@ export default function App() {
         ) ?? null)
       : null;
 
+  const unresolvedHoles = useMemo<UnresolvedHole[]>(() => {
+    if (validationState.status !== 'success' || validationState.valid) {
+      return [];
+    }
+
+    const entries = new Map<string, string | undefined>();
+
+    for (const diagnostic of validationState.diagnostics) {
+      if (!isHoleDiagnostic(diagnostic)) {
+        continue;
+      }
+
+      const name = getHoleName(diagnostic);
+      if (!name) {
+        continue;
+      }
+
+      const expectedType = getExpectedType(diagnostic);
+      if (!entries.has(name) || (!entries.get(name) && expectedType)) {
+        entries.set(name, expectedType);
+      }
+    }
+
+    return Array.from(entries.entries()).map(([name, expectedType]) => ({
+      name,
+      expectedType
+    }));
+  }, [validationState]);
+
+  const validationSummary = useMemo(() => {
+    if (validationState.status !== 'success') {
+      return null;
+    }
+
+    if (validationState.valid) {
+      return { kind: 'valid' as const, label: 'Valid contract' };
+    }
+
+    const hasOnlyHoles =
+      validationState.diagnostics.length > 0 &&
+      validationState.diagnostics.every((diagnostic) => isHoleDiagnostic(diagnostic));
+
+    if (hasOnlyHoles) {
+      return { kind: 'incomplete' as const, label: 'Incomplete contract' };
+    }
+
+    return { kind: 'invalid' as const, label: 'Invalid contract' };
+  }, [validationState]);
+
   const handleApplyInput = async () => {
     if (simulationState.status !== 'success' || !selectedSimulationInput) {
       return;
@@ -301,14 +409,28 @@ export default function App() {
         ? validationState.diagnostics.map((diagnostic) => {
             const fromMessage = diagnostic.message.match(/line\s+(\d+)(?:\D+column\s+(\d+))?/i);
 
+            const hasExplicitEndColumn = typeof diagnostic.endColumn === 'number';
             let line = diagnostic.line ?? Number(fromMessage?.[1] ?? 0);
             let column = diagnostic.column ?? Number(fromMessage?.[2] ?? 0);
             let endLine = diagnostic.endLine ?? line;
             let endColumn = diagnostic.endColumn ?? column;
 
             if (!line) {
+              const holeName = getHoleName(diagnostic);
+              if (holeName) {
+                const holePosition = findTokenPosition(holeName);
+                if (holePosition) {
+                  line = holePosition.line;
+                  column = holePosition.column;
+                  endLine = holePosition.endLine;
+                  endColumn = holePosition.endColumn;
+                }
+              }
+            }
+
+            if (!line) {
               const messageTokens = Array.from(
-                diagnostic.message.matchAll(/['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/g)
+                diagnostic.message.matchAll(/['"`]([?A-Za-z_][?A-Za-z0-9_]*)['"`]/g)
               ).map((match) => match[1]);
 
               const pathTokens = diagnostic.path
@@ -339,12 +461,18 @@ export default function App() {
             const endLineText = lines[safeEndLine - 1] ?? '';
             const safeEndColumn =
               endColumn && endColumn > 0
-                ? endColumn
+                ? hasExplicitEndColumn
+                  ? endColumn + 1
+                  : endColumn
                 : Math.max(safeColumn + 1, endLineText.length + 1);
 
             return {
-              severity: monaco.MarkerSeverity.Error,
-              message: diagnostic.message,
+              severity: isHoleDiagnostic(diagnostic)
+                ? monaco.MarkerSeverity.Warning
+                : monaco.MarkerSeverity.Error,
+              message: isHoleDiagnostic(diagnostic)
+                ? `${getHoleName(diagnostic) ?? 'Hole'} type: ${getExpectedType(diagnostic) ?? 'Unknown'}`
+                : diagnostic.message,
               startLineNumber: safeLine,
               startColumn: safeColumn,
               endLineNumber: safeEndLine,
@@ -456,20 +584,44 @@ export default function App() {
               <div className="panel-block">
                 <div
                   className={`panel-badge ${
-                    validationState.valid ? 'panel-badge--ok' : 'panel-badge--error'
+                    validationSummary?.kind === 'valid'
+                      ? 'panel-badge--ok'
+                      : validationSummary?.kind === 'incomplete'
+                        ? 'panel-badge--warn'
+                        : 'panel-badge--error'
                   }`}
                 >
-                  {validationState.valid ? 'Valid contract' : 'Invalid contract'}
+                  {validationSummary?.label}
                 </div>
+                {unresolvedHoles.length > 0 ? (
+                  <div className="panel-block">
+                    <p className="panel-result">Unresolved holes</p>
+                    <ul className="panel-list hole-list">
+                      {unresolvedHoles.map((hole) => (
+                        <li key={hole.name}>
+                          <code>{hole.name}</code>
+                          {` type: ${hole.expectedType ?? 'Unknown'}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {validationState.diagnostics.length === 0 ? (
                   <p className="panel-result">No diagnostics.</p>
-                ) : (
+                ) : validationSummary?.kind === 'incomplete' ? null : (
                   <ul className="panel-list">
                     {validationState.diagnostics.map((diagnostic, index) => (
                       <li key={`${diagnostic.message}-${index}`}>{diagnostic.message}</li>
                     ))}
                   </ul>
                 )}
+                {validationSummary?.kind === 'incomplete' && unresolvedHoles.length === 0 ? (
+                  <ul className="panel-list">
+                    {validationState.diagnostics.map((diagnostic, index) => (
+                      <li key={`${diagnostic.message}-${index}`}>{diagnostic.message}</li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
             ) : null}
           </section>
