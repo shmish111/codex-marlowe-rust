@@ -52,6 +52,71 @@ async fn openapi_endpoint_returns_spec() {
     assert_eq!(status, StatusCode::OK);
     assert!(json["paths"]["/simulate/step"].is_object());
     assert!(json["paths"]["/simulate/preview"].is_object());
+    assert!(json["paths"]["/typecheck/explain"].is_object());
+}
+
+#[tokio::test]
+async fn typecheck_explain_returns_blocking_and_warning_items() {
+    let app = build_router();
+    let contract = r#"
+Let:
+  name: "x"
+  value: { Constant: 1 }
+  then:
+    When:
+      cases: []
+      timeout: $deadline
+      timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({ "contract_yaml": contract });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/typecheck/explain")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["ready_to_run"], false);
+    assert_eq!(json["success"]["summary"]["param_count"], 1);
+    assert_eq!(json["success"]["summary"]["warning_count"], 1);
+    assert_eq!(json["success"]["blocking"][0]["code"], "ParamUnresolved");
+    assert!(json["success"]["blocking"][0]["hint"]
+        .as_str()
+        .unwrap()
+        .contains("Substitute"));
+    assert_eq!(json["success"]["warnings"][0]["code"], "Warning");
+}
+
+#[tokio::test]
+async fn typecheck_explain_rejects_parse_errors() {
+    let app = build_router();
+    let request_body = json!({ "contract_yaml": "When: [" });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/typecheck/explain")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "error");
+    assert_eq!(json["error"]["code"], "RequestError");
+    assert_eq!(json["error"]["subcode"], "ParseError");
 }
 
 #[tokio::test]

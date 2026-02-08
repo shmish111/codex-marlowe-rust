@@ -31,6 +31,7 @@ pub fn build_router() -> Router {
         .route("/openapi.json", get(openapi_handler))
         .route("/simulate/step", post(simulate_step_handler))
         .route("/simulate/preview", post(simulate_preview_handler))
+        .route("/typecheck/explain", post(typecheck_explain_handler))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -393,13 +394,56 @@ pub struct PreviewBoundResponse {
     pub to: String,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TypecheckExplainRequest {
+    pub contract_yaml: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TypecheckExplainResponse {
+    pub result: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<TypecheckExplainSuccessResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<SimulateErrorResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TypecheckExplainSuccessResponse {
+    pub ready_to_run: bool,
+    pub summary: TypecheckExplainSummaryResponse,
+    pub blocking: Vec<TypecheckExplainItemResponse>,
+    pub warnings: Vec<TypecheckExplainItemResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TypecheckExplainSummaryResponse {
+    pub blocking_count: usize,
+    pub warning_count: usize,
+    pub error_count: usize,
+    pub hole_count: usize,
+    pub param_count: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TypecheckExplainItemResponse {
+    pub code: String,
+    pub path: String,
+    pub message: String,
+    pub hint: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schema(value_type = Object)]
+    pub details: BTreeMap<String, String>,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
         health_handler,
         openapi_handler,
         simulate_step_handler,
-        simulate_preview_handler
+        simulate_preview_handler,
+        typecheck_explain_handler
     ),
     components(
         schemas(
@@ -425,6 +469,11 @@ pub struct PreviewBoundResponse {
             PreviewSuccessResponse,
             PreviewInputResponse,
             PreviewBoundResponse,
+            TypecheckExplainRequest,
+            TypecheckExplainResponse,
+            TypecheckExplainSuccessResponse,
+            TypecheckExplainSummaryResponse,
+            TypecheckExplainItemResponse,
             Party,
             Token,
             ChoiceId,
@@ -751,6 +800,122 @@ pub async fn simulate_preview_handler(
             None,
         ),
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/typecheck/explain",
+    tag = "simulation",
+    request_body = TypecheckExplainRequest,
+    responses(
+        (status = 200, description = "Typecheck explanation generated", body = TypecheckExplainResponse),
+        (status = 400, description = "Explain request rejected", body = TypecheckExplainResponse)
+    )
+)]
+pub async fn typecheck_explain_handler(
+    _state: State<AppState>,
+    Json(request): Json<TypecheckExplainRequest>,
+) -> (StatusCode, Json<TypecheckExplainResponse>) {
+    let contract = match parse_contract_yaml(&request.contract_yaml) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return typecheck_explain_bad_request(
+                "RequestError",
+                "ParseError",
+                format!("{}: {}", err.path, err.message),
+                Some(err.path),
+                None,
+            )
+        }
+    };
+
+    let validation = type_check(&contract, &TypeCheckContext::default());
+    let error_count = validation.errors.len();
+    let hole_count = validation.holes.len();
+    let param_count = validation.params.len();
+    let warning_count = validation.warnings.len();
+
+    let mut blocking = Vec::new();
+    for error in &validation.errors {
+        blocking.push(TypecheckExplainItemResponse {
+            code: "TypeError".to_owned(),
+            path: error.path.clone(),
+            message: error.message.clone(),
+            hint: hint_for_type_error(&error.message),
+            details: BTreeMap::new(),
+        });
+    }
+    for hole in &validation.holes {
+        let mut details = BTreeMap::new();
+        details.insert("name".to_owned(), hole.name.clone());
+        details.insert("type".to_owned(), hole.ty.as_str().to_owned());
+        blocking.push(TypecheckExplainItemResponse {
+            code: "HoleUnresolved".to_owned(),
+            path: hole.path.clone(),
+            message: format!(
+                "hole '{}' has inferred type {}",
+                hole.name,
+                hole.ty.as_str()
+            ),
+            hint: format!(
+                "Provide a concrete {} value for '?{}' to fully instantiate the contract.",
+                hole.ty.as_str(),
+                hole.name
+            ),
+            details,
+        });
+    }
+    for param in &validation.params {
+        let mut details = BTreeMap::new();
+        details.insert("name".to_owned(), param.name.clone());
+        details.insert("type".to_owned(), param.ty.as_str().to_owned());
+        blocking.push(TypecheckExplainItemResponse {
+            code: "ParamUnresolved".to_owned(),
+            path: param.path.clone(),
+            message: format!(
+                "parameter '{}' has inferred type {} and must be instantiated",
+                param.name,
+                param.ty.as_str()
+            ),
+            hint: format!(
+                "Substitute '${}' with a concrete {} value before simulation.",
+                param.name,
+                param.ty.as_str()
+            ),
+            details,
+        });
+    }
+
+    let mut warnings = Vec::new();
+    for warning in &validation.warnings {
+        warnings.push(TypecheckExplainItemResponse {
+            code: "Warning".to_owned(),
+            path: warning.path.clone(),
+            message: warning.message.clone(),
+            hint: hint_for_warning(&warning.message),
+            details: BTreeMap::new(),
+        });
+    }
+
+    (
+        StatusCode::OK,
+        Json(TypecheckExplainResponse {
+            result: "success",
+            success: Some(TypecheckExplainSuccessResponse {
+                ready_to_run: validation.ready_to_run,
+                summary: TypecheckExplainSummaryResponse {
+                    blocking_count: blocking.len(),
+                    warning_count,
+                    error_count,
+                    hole_count,
+                    param_count,
+                },
+                blocking,
+                warnings,
+            }),
+            error: None,
+        }),
+    )
 }
 
 fn map_state_request(request: SimulateStateRequest) -> Result<SimState, String> {
@@ -1153,6 +1318,67 @@ fn preview_internal_error(message: String) -> (StatusCode, Json<SimulatePreviewR
             }),
         }),
     )
+}
+
+fn typecheck_explain_bad_request(
+    code: &str,
+    subcode: &str,
+    message: String,
+    path: Option<String>,
+    diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
+) -> (StatusCode, Json<TypecheckExplainResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(TypecheckExplainResponse {
+            result: "error",
+            success: None,
+            error: Some(SimulateErrorResponse {
+                code: code.to_owned(),
+                subcode: subcode.to_owned(),
+                message,
+                path,
+                diagnostics,
+            }),
+        }),
+    )
+}
+
+fn hint_for_type_error(error_message: &str) -> String {
+    let message = error_message.to_lowercase();
+    if message.contains("undefined let binding") {
+        "Declare the referenced `Let.name` in scope before `UseValue`, or rename it to an existing binding.".to_owned()
+    } else if message.contains("unknown token") {
+        "Use a token known to your context, or extend context definitions to include this token."
+            .to_owned()
+    } else if message.contains("unknown account owner") {
+        "Use an account owner present in context definitions for account operations.".to_owned()
+    } else if message.contains("unknown party") {
+        "Use a known party role/address from context definitions.".to_owned()
+    } else if message.contains("not declared in contract or context") {
+        "Add a matching `Choice` action in the contract, or declare the choice in context."
+            .to_owned()
+    } else if message.contains("invalid bound range") {
+        "Make sure each choice bound has `from <= to` once values are concrete.".to_owned()
+    } else if message.contains("conflicting inferred types") {
+        "Keep each repeated hole/parameter name consistent with one DSL type across the contract."
+            .to_owned()
+    } else {
+        "Adjust the contract expression at this path so it satisfies Marlowe type and scope rules."
+            .to_owned()
+    }
+}
+
+fn hint_for_warning(warning_message: &str) -> String {
+    let message = warning_message.to_lowercase();
+    if message.contains("shadows an existing binding") {
+        "Rename the inner `Let.name` if the shadowing is accidental.".to_owned()
+    } else if message.contains("never used") {
+        "Remove the unused let binding, or reference it with `UseValue`.".to_owned()
+    } else if message.contains("cannot be statically validated") {
+        "Use concrete constants in bounds if you want compile-time bound validation.".to_owned()
+    } else {
+        "Review this warning and confirm the behavior is intentional.".to_owned()
+    }
 }
 
 fn sim_error_code(error: &SimError) -> String {

@@ -146,6 +146,46 @@
           }
         }
       }
+    },
+    "/typecheck/explain": {
+      "post": {
+        "tags": [
+          "simulation"
+        ],
+        "operationId": "typecheck_explain_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TypecheckExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Typecheck explanation generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TypecheckExplainResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Explain request rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TypecheckExplainResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1188,6 +1228,135 @@
                 "$ref": "#/components/schemas/TraceMinTimeDeltaResponse"
               }
             ]
+          }
+        }
+      },
+      "TypecheckExplainItemResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "path",
+          "message",
+          "hint"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "TypecheckExplainRequest": {
+        "type": "object",
+        "required": [
+          "contract_yaml"
+        ],
+        "properties": {
+          "contract_yaml": {
+            "type": "string"
+          }
+        }
+      },
+      "TypecheckExplainResponse": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SimulateErrorResponse"
+              }
+            ]
+          },
+          "result": {
+            "type": "string"
+          },
+          "success": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TypecheckExplainSuccessResponse"
+              }
+            ]
+          }
+        }
+      },
+      "TypecheckExplainSuccessResponse": {
+        "type": "object",
+        "required": [
+          "ready_to_run",
+          "summary",
+          "blocking",
+          "warnings"
+        ],
+        "properties": {
+          "blocking": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypecheckExplainItemResponse"
+            }
+          },
+          "ready_to_run": {
+            "type": "boolean"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TypecheckExplainSummaryResponse"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TypecheckExplainItemResponse"
+            }
+          }
+        }
+      },
+      "TypecheckExplainSummaryResponse": {
+        "type": "object",
+        "required": [
+          "blocking_count",
+          "warning_count",
+          "error_count",
+          "hole_count",
+          "param_count"
+        ],
+        "properties": {
+          "blocking_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hole_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "param_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warning_count": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
