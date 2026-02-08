@@ -243,6 +243,53 @@ h2 {
   color: #3f3d38;
 }
 
+.panel-result--error {
+  color: #a72d2d;
+}
+
+.panel-block {
+  margin-top: 8px;
+}
+
+.panel-badge {
+  display: inline-flex;
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.panel-badge--ok {
+  color: #156f3f;
+  background: rgba(21, 111, 63, 0.12);
+  border-color: rgba(21, 111, 63, 0.2);
+}
+
+.panel-badge--warn {
+  color: #8f5b00;
+  background: rgba(143, 91, 0, 0.12);
+  border-color: rgba(143, 91, 0, 0.2);
+}
+
+.panel-badge--error {
+  color: #a72d2d;
+  background: rgba(167, 45, 45, 0.12);
+  border-color: rgba(167, 45, 45, 0.2);
+}
+
+.panel-list {
+  margin-top: 8px;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #3f3d38;
+}
+
+.panel-list li + li {
+  margin-top: 4px;
+}
+
 .modal {
   position: fixed;
   inset: 0;

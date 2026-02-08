@@ -70,18 +70,27 @@ describe('App', () => {
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
+      json: async () => ({ openapi: '3.1.0' })
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
       json: async () => ({ result: 'ok', success: { inputs: [] }, error: null })
     });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run validation/i })).toBeDisabled();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /run validation stub/i }));
+    await user.click(screen.getByRole('button', { name: /connect api/i }));
+    expect(await screen.findByText('Connected (3.1.0)')).toBeInTheDocument();
 
-    expect(await screen.findByText('Valid with no diagnostics.')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/simulate/preview', {
+    await user.click(screen.getByRole('button', { name: /run validation/i }));
+
+    expect(await screen.findByText('Valid contract')).toBeInTheDocument();
+    expect(await screen.findByText('No diagnostics.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -97,6 +106,10 @@ describe('App', () => {
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
+      json: async () => ({ openapi: '3.1.0' })
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
       json: async () => ({ result: 'ok', success: { inputs: [{}] }, error: null })
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -105,12 +118,16 @@ describe('App', () => {
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /run simulation stub/i }));
+    await user.click(screen.getByRole('button', { name: /connect api/i }));
+    expect(await screen.findByText('Connected (3.1.0)')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /run simulation/i }));
 
     expect(
-      await screen.findByText('Preview succeeded with 1 available input(s). No warnings.')
+      await screen.findByText('Preview succeeded with 1 available input(s)')
     ).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/simulate/preview', {
+    expect(await screen.findByText('No warnings')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

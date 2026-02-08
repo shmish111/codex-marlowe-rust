@@ -14,6 +14,18 @@ type Example = {
   file: string;
 };
 
+type ValidationState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; valid: boolean; diagnostics: string[] }
+  | { status: 'error'; message: string };
+
+type SimulationState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; summary: string; warnings: string[] }
+  | { status: 'error'; message: string };
+
 export default function App() {
   const [isModalOpen, setModalOpen] = useState(false);
   const [selectedExample, setSelectedExample] = useState<Example | null>(null);
@@ -23,8 +35,8 @@ export default function App() {
   const [examplesError, setExamplesError] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [apiMessage, setApiMessage] = useState('Not connected');
-  const [validationResult, setValidationResult] = useState<string>('No validation run yet.');
-  const [simulationResult, setSimulationResult] = useState<string>('No simulation run yet.');
+  const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
+  const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
   const [isValidationRunning, setValidationRunning] = useState(false);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
 
@@ -103,22 +115,17 @@ export default function App() {
 
   const handleValidate = async () => {
     setValidationRunning(true);
-    setValidationResult('Validating...');
+    setValidationState({ status: 'loading' });
     try {
       const result = await validateContract(code);
-      const diagnostics = result.diagnostics.join(', ');
-      setValidationResult(
-        result.valid
-          ? diagnostics
-            ? `Valid. Diagnostics: ${diagnostics}`
-            : 'Valid with no diagnostics.'
-          : diagnostics
-            ? `Invalid. Diagnostics: ${diagnostics}`
-            : 'Invalid with no diagnostics.'
-      );
+      setValidationState({
+        status: 'success',
+        valid: result.valid,
+        diagnostics: result.diagnostics
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      setValidationResult(`Validation failed: ${message}`);
+      setValidationState({ status: 'error', message });
     } finally {
       setValidationRunning(false);
     }
@@ -126,20 +133,19 @@ export default function App() {
 
   const handleSimulate = async () => {
     setSimulationRunning(true);
-    setSimulationResult('Simulating...');
+    setSimulationState({ status: 'loading' });
     try {
       const result = await simulateContract(code);
-      const warnings = result.warnings.join(', ');
-      setSimulationResult(
-        warnings ? `${result.summary}. Warnings: ${warnings}` : `${result.summary}. No warnings.`
-      );
+      setSimulationState({ status: 'success', summary: result.summary, warnings: result.warnings });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
-      setSimulationResult(`Simulation failed: ${message}`);
+      setSimulationState({ status: 'error', message });
     } finally {
       setSimulationRunning(false);
     }
   };
+
+  const isApiConnected = apiStatus === 'connected';
 
   return (
     <div className="app">
@@ -222,28 +228,92 @@ export default function App() {
             <div className="panel-card">
               <h3>Validation</h3>
               <p>Surface schema and logic checks in real-time.</p>
+              <div
+                className={`panel-badge ${isApiConnected ? 'panel-badge--ok' : 'panel-badge--warn'}`}
+              >
+                {isApiConnected ? 'API connected' : 'Connect API first'}
+              </div>
               <button
                 className="panel-action"
                 type="button"
                 onClick={handleValidate}
-                disabled={isValidationRunning}
+                disabled={!isApiConnected || isValidationRunning}
               >
-                Run validation stub
+                Run validation
               </button>
-              <p className="panel-result">{validationResult}</p>
+              {validationState.status === 'idle' ? (
+                <p className="panel-result">No validation run yet.</p>
+              ) : null}
+              {validationState.status === 'loading' ? (
+                <p className="panel-result">Validation in progress...</p>
+              ) : null}
+              {validationState.status === 'error' ? (
+                <p className="panel-result panel-result--error">
+                  Validation failed: {validationState.message}
+                </p>
+              ) : null}
+              {validationState.status === 'success' ? (
+                <div className="panel-block">
+                  <div
+                    className={`panel-badge ${
+                      validationState.valid ? 'panel-badge--ok' : 'panel-badge--error'
+                    }`}
+                  >
+                    {validationState.valid ? 'Valid contract' : 'Invalid contract'}
+                  </div>
+                  {validationState.diagnostics.length === 0 ? (
+                    <p className="panel-result">No diagnostics.</p>
+                  ) : (
+                    <ul className="panel-list">
+                      {validationState.diagnostics.map((diagnostic, index) => (
+                        <li key={`${diagnostic}-${index}`}>{diagnostic}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
             </div>
             <div className="panel-card">
               <h3>Simulation</h3>
               <p>Preview outcomes once the backend API is connected.</p>
+              <div
+                className={`panel-badge ${isApiConnected ? 'panel-badge--ok' : 'panel-badge--warn'}`}
+              >
+                {isApiConnected ? 'API connected' : 'Connect API first'}
+              </div>
               <button
                 className="panel-action"
                 type="button"
                 onClick={handleSimulate}
-                disabled={isSimulationRunning}
+                disabled={!isApiConnected || isSimulationRunning}
               >
-                Run simulation stub
+                Run simulation
               </button>
-              <p className="panel-result">{simulationResult}</p>
+              {simulationState.status === 'idle' ? (
+                <p className="panel-result">No simulation run yet.</p>
+              ) : null}
+              {simulationState.status === 'loading' ? (
+                <p className="panel-result">Simulation in progress...</p>
+              ) : null}
+              {simulationState.status === 'error' ? (
+                <p className="panel-result panel-result--error">
+                  Simulation failed: {simulationState.message}
+                </p>
+              ) : null}
+              {simulationState.status === 'success' ? (
+                <div className="panel-block">
+                  <p className="panel-result">{simulationState.summary}</p>
+                  {simulationState.warnings.length === 0 ? (
+                    <div className="panel-badge panel-badge--ok">No warnings</div>
+                  ) : (
+                    <ul className="panel-list">
+                      {simulationState.warnings.map((warning, index) => (
+                        <li key={`${warning}-${index}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </aside>
