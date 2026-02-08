@@ -57,12 +57,25 @@ describe('App', () => {
 
     render(<App />);
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /connect api/i }));
-
-    expect(await screen.findByText('Connected (3.1.0)')).toBeInTheDocument();
+    expect(screen.queryByText(/api connection failed/i)).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:3000/openapi.json');
+  });
+
+  it('shows a warning when API is not connected', async () => {
+    const fetchMock = vi.fn();
+    mockExamplesFetch(fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: async () => ({})
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText(/api connection failed: http 503/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run validation/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /run simulation/i })).toBeDisabled();
   });
 
   it('runs validation stub request', async () => {
@@ -80,12 +93,9 @@ describe('App', () => {
 
     render(<App />);
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /run validation/i })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /run validation/i })).toBeEnabled();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /connect api/i }));
-    expect(await screen.findByText('Connected (3.1.0)')).toBeInTheDocument();
-
     await user.click(screen.getByRole('button', { name: /run validation/i }));
 
     expect(await screen.findByText('Valid contract')).toBeInTheDocument();
@@ -148,9 +158,6 @@ describe('App', () => {
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /connect api/i }));
-    expect(await screen.findByText('Connected (3.1.0)')).toBeInTheDocument();
-
     await user.click(screen.getByRole('button', { name: /run simulation/i }));
 
     expect(

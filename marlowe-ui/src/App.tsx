@@ -44,7 +44,7 @@ export default function App() {
   const [isLoadingExamples, setLoadingExamples] = useState(true);
   const [examplesError, setExamplesError] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
-  const [apiMessage, setApiMessage] = useState('Not connected');
+  const [apiMessage, setApiMessage] = useState('API is not connected.');
   const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
   const [isValidationRunning, setValidationRunning] = useState(false);
@@ -53,6 +53,32 @@ export default function App() {
   const [choiceValue, setChoiceValue] = useState<string>('0');
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
+
+  const checkApiConnection = async (): Promise<boolean> => {
+    setApiStatus('connecting');
+    setApiMessage('Connecting to API...');
+
+    try {
+      const response = await fetch(OPEN_API_URL);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const spec = (await response.json()) as Record<string, unknown>;
+      if (typeof spec.openapi !== 'string') {
+        throw new Error('Missing openapi field');
+      }
+
+      setApiStatus('connected');
+      setApiMessage('');
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setApiStatus('error');
+      setApiMessage(`API connection failed: ${message}`);
+      return false;
+    }
+  };
 
   useEffect(() => {
     const loadExamples = async () => {
@@ -76,6 +102,7 @@ export default function App() {
     };
 
     loadExamples();
+    void checkApiConnection();
   }, []);
 
   const exampleCards = useMemo(
@@ -101,31 +128,15 @@ export default function App() {
     [examples]
   );
 
-  const handleConnectApi = async () => {
-    setApiStatus('connecting');
-    setApiMessage('Connecting...');
-
-    try {
-      const response = await fetch(OPEN_API_URL);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const spec = (await response.json()) as Record<string, unknown>;
-      if (typeof spec.openapi !== 'string') {
-        throw new Error('Missing openapi field');
-      }
-
-      setApiStatus('connected');
-      setApiMessage(`Connected (${spec.openapi})`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setApiStatus('error');
-      setApiMessage(`Connection failed: ${message}`);
-    }
-  };
-
   const handleValidate = async () => {
+    if (apiStatus !== 'connected') {
+      const connected = await checkApiConnection();
+      if (!connected) {
+        setValidationState({ status: 'error', message: 'API not connected.' });
+        return;
+      }
+    }
+
     setValidationRunning(true);
     setValidationState({ status: 'loading' });
     try {
@@ -144,6 +155,14 @@ export default function App() {
   };
 
   const handleSimulate = async () => {
+    if (apiStatus !== 'connected') {
+      const connected = await checkApiConnection();
+      if (!connected) {
+        setSimulationState({ status: 'error', message: 'API not connected.' });
+        return;
+      }
+    }
+
     setSimulationRunning(true);
     setSimulationState({ status: 'loading' });
     try {
@@ -224,15 +243,9 @@ export default function App() {
           <button className="primary" type="button" onClick={() => setModalOpen(true)}>
             Load example
           </button>
-          <button
-            className="ghost"
-            type="button"
-            onClick={handleConnectApi}
-            disabled={apiStatus === 'connecting'}
-          >
-            Connect API
-          </button>
-          <span className={`api-status api-status--${apiStatus}`}>{apiMessage}</span>
+          {apiStatus !== 'connected' ? (
+            <span className={`api-warning api-warning--${apiStatus}`}>{apiMessage}</span>
+          ) : null}
         </div>
       </header>
 
@@ -291,11 +304,6 @@ export default function App() {
             <div className="panel-card">
               <h3>Validation</h3>
               <p>Surface schema and logic checks in real-time.</p>
-              <div
-                className={`panel-badge ${isApiConnected ? 'panel-badge--ok' : 'panel-badge--warn'}`}
-              >
-                {isApiConnected ? 'API connected' : 'Connect API first'}
-              </div>
               <button
                 className="panel-action"
                 type="button"
@@ -339,11 +347,6 @@ export default function App() {
             <div className="panel-card">
               <h3>Simulation</h3>
               <p>Preview outcomes once the backend API is connected.</p>
-              <div
-                className={`panel-badge ${isApiConnected ? 'panel-badge--ok' : 'panel-badge--warn'}`}
-              >
-                {isApiConnected ? 'API connected' : 'Connect API first'}
-              </div>
               <button
                 className="panel-action"
                 type="button"
