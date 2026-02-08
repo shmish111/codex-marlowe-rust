@@ -288,7 +288,7 @@ pub fn preview_inputs(
     }
 
     let (environment, fixed_state) = fix_interval(interval_start, interval_end, state)?;
-    let reduced = reduce_until_quiescent(&environment, &fixed_state, contract, false)?;
+    let reduced = reduce_until_quiescent(&environment, &fixed_state, contract, "$", false)?;
 
     let inputs = match &reduced.contract {
         Contract::When { cases, .. } => cases
@@ -361,6 +361,7 @@ fn apply_all_inputs(
 ) -> Result<ApplyAllResult, SimError> {
     let mut current_state = state.clone();
     let mut current_contract = contract.clone();
+    let mut current_contract_path = "$".to_owned();
     let mut warnings = Vec::new();
     let mut payments = Vec::new();
     let mut reduced_or_applied = false;
@@ -371,6 +372,7 @@ fn apply_all_inputs(
             environment,
             &current_state,
             &current_contract,
+            &current_contract_path,
             include_trace,
         )?;
         warnings.extend(reduced.warnings);
@@ -378,9 +380,16 @@ fn apply_all_inputs(
         trace.extend(reduced.trace);
         current_state = reduced.state;
         current_contract = reduced.contract;
+        current_contract_path = reduced.contract_path;
 
-        let applied = apply_input(environment, &current_state, &current_contract, input)
-            .ok_or(SimError::NoMatchForInput { input_index: index })?;
+        let applied = apply_input(
+            environment,
+            &current_state,
+            &current_contract,
+            &current_contract_path,
+            input,
+        )
+        .ok_or(SimError::NoMatchForInput { input_index: index })?;
 
         reduced_or_applied = true;
         if let Some(warning) = applied.warning {
@@ -405,12 +414,14 @@ fn apply_all_inputs(
         }
         current_state = applied.state;
         current_contract = applied.contract;
+        current_contract_path = applied.next_contract_path;
     }
 
     let reduced = reduce_until_quiescent(
         environment,
         &current_state,
         &current_contract,
+        &current_contract_path,
         include_trace,
     )?;
     reduced_or_applied |= reduced.reduced;
@@ -434,6 +445,7 @@ struct ReduceUntilResult {
     payments: Vec<Payment>,
     state: SimState,
     contract: Contract,
+    contract_path: String,
     trace: Vec<TraceStep>,
 }
 
@@ -441,17 +453,24 @@ fn reduce_until_quiescent(
     environment: &Environment,
     state: &SimState,
     contract: &Contract,
+    contract_path: &str,
     include_trace: bool,
 ) -> Result<ReduceUntilResult, SimError> {
     let mut current_state = state.clone();
     let mut current_contract = contract.clone();
+    let mut current_contract_path = contract_path.to_owned();
     let mut warnings = Vec::new();
     let mut payments = Vec::new();
     let mut any_reduced = false;
     let mut trace = Vec::new();
 
     loop {
-        match reduce_step(environment, &current_state, &current_contract)? {
+        match reduce_step(
+            environment,
+            &current_state,
+            &current_contract,
+            &current_contract_path,
+        )? {
             ReduceStep::NotReduced => {
                 return Ok(ReduceUntilResult {
                     reduced: any_reduced,
@@ -459,6 +478,7 @@ fn reduce_until_quiescent(
                     payments,
                     state: current_state,
                     contract: current_contract,
+                    contract_path: current_contract_path,
                     trace,
                 });
             }
@@ -473,7 +493,7 @@ fn reduce_until_quiescent(
                 if include_trace {
                     trace.push(TraceStep::Reduced {
                         rule: step.rule.clone(),
-                        contract_path: "$".to_owned(),
+                        contract_path: step.contract_path.clone(),
                         warning: step.warning.clone(),
                         payment: step.payment.clone(),
                         delta: state_delta(&current_state, &step.state),
@@ -481,6 +501,7 @@ fn reduce_until_quiescent(
                 }
                 current_state = step.state;
                 current_contract = step.contract;
+                current_contract_path = step.next_contract_path;
             }
         }
     }
@@ -493,6 +514,8 @@ enum ReduceStep {
 
 struct ReducedStepData {
     rule: TraceReduceRule,
+    contract_path: String,
+    next_contract_path: String,
     warning: Option<TransactionWarning>,
     payment: Option<Payment>,
     state: SimState,
@@ -503,10 +526,11 @@ fn reduce_step(
     environment: &Environment,
     state: &SimState,
     contract: &Contract,
+    contract_path: &str,
 ) -> Result<ReduceStep, SimError> {
     match contract {
         Contract::Hole(_) => Ok(ReduceStep::NotReduced),
-        Contract::Close => Ok(refund_one(state)),
+        Contract::Close => Ok(refund_one(state, contract_path)),
         Contract::Pay {
             from,
             to,
@@ -518,6 +542,8 @@ fn reduce_step(
             if amount_to_pay <= BigInt::zero() {
                 return Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
                     rule: TraceReduceRule::Pay,
+                    contract_path: contract_path.to_owned(),
+                    next_contract_path: contract_field(contract_path, "then"),
                     warning: Some(TransactionWarning::NonPositivePay {
                         from: from.clone(),
                         to: to.clone(),
@@ -559,6 +585,8 @@ fn reduce_step(
 
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
                 rule: TraceReduceRule::Pay,
+                contract_path: contract_path.to_owned(),
+                next_contract_path: contract_field(contract_path, "then"),
                 warning,
                 payment: Some(payment),
                 state: new_state,
@@ -573,6 +601,12 @@ fn reduce_step(
             };
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
                 rule: TraceReduceRule::IfBranch,
+                contract_path: contract_path.to_owned(),
+                next_contract_path: if eval_observation(state, environment, cond) {
+                    contract_field(contract_path, "then")
+                } else {
+                    contract_field(contract_path, "else")
+                },
                 warning: None,
                 payment: None,
                 state: state.clone(),
@@ -590,6 +624,8 @@ fn reduce_step(
             } else if timeout <= environment.start {
                 Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
                     rule: TraceReduceRule::WhenTimeout,
+                    contract_path: contract_path.to_owned(),
+                    next_contract_path: contract_field(contract_path, "timeout_continuation"),
                     warning: None,
                     payment: None,
                     state: state.clone(),
@@ -613,6 +649,8 @@ fn reduce_step(
 
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
                 rule: TraceReduceRule::Let,
+                contract_path: contract_path.to_owned(),
+                next_contract_path: contract_field(contract_path, "then"),
                 warning,
                 payment: None,
                 state: new_state,
@@ -627,6 +665,8 @@ fn reduce_step(
             };
             Ok(ReduceStep::Reduced(Box::new(ReducedStepData {
                 rule: TraceReduceRule::Assert,
+                contract_path: contract_path.to_owned(),
+                next_contract_path: contract_field(contract_path, "then"),
                 warning,
                 payment: None,
                 state: state.clone(),
@@ -636,7 +676,7 @@ fn reduce_step(
     }
 }
 
-fn refund_one(state: &SimState) -> ReduceStep {
+fn refund_one(state: &SimState, contract_path: &str) -> ReduceStep {
     let mut target: Option<(AccountId, BigInt)> = None;
     for (account, balance) in &state.accounts {
         if balance > &BigInt::zero() {
@@ -660,6 +700,8 @@ fn refund_one(state: &SimState) -> ReduceStep {
 
     ReduceStep::Reduced(Box::new(ReducedStepData {
         rule: TraceReduceRule::CloseRefund,
+        contract_path: contract_path.to_owned(),
+        next_contract_path: contract_path.to_owned(),
         warning: None,
         payment: Some(payment),
         state: new_state,
@@ -669,6 +711,7 @@ fn refund_one(state: &SimState) -> ReduceStep {
 
 struct ApplyInputResult {
     contract_path: String,
+    next_contract_path: String,
     warning: Option<TransactionWarning>,
     state: SimState,
     contract: Contract,
@@ -678,6 +721,7 @@ fn apply_input(
     environment: &Environment,
     state: &SimState,
     contract: &Contract,
+    contract_path: &str,
     input: &SimInput,
 ) -> Option<ApplyInputResult> {
     let Contract::When { cases, .. } = contract else {
@@ -722,7 +766,8 @@ fn apply_input(
                         None
                     };
                     return Some(ApplyInputResult {
-                        contract_path: format!("$.cases[{case_index}]"),
+                        contract_path: format!("{contract_path}.cases[{case_index}]"),
+                        next_contract_path: format!("{contract_path}.cases[{case_index}].then"),
                         warning,
                         state: new_state,
                         contract: (**then).clone(),
@@ -740,7 +785,8 @@ fn apply_input(
                     let mut new_state = state.clone();
                     new_state.choices.insert(id.clone(), value.clone());
                     return Some(ApplyInputResult {
-                        contract_path: format!("$.cases[{case_index}]"),
+                        contract_path: format!("{contract_path}.cases[{case_index}]"),
+                        next_contract_path: format!("{contract_path}.cases[{case_index}].then"),
                         warning: None,
                         state: new_state,
                         contract: (**then).clone(),
@@ -750,7 +796,8 @@ fn apply_input(
             (Action::Notify { if_ }, SimInput::Notify) => {
                 if eval_observation(state, environment, if_) {
                     return Some(ApplyInputResult {
-                        contract_path: format!("$.cases[{case_index}]"),
+                        contract_path: format!("{contract_path}.cases[{case_index}]"),
+                        next_contract_path: format!("{contract_path}.cases[{case_index}].then"),
                         warning: None,
                         state: state.clone(),
                         contract: (**then).clone(),
@@ -762,6 +809,10 @@ fn apply_input(
     }
 
     None
+}
+
+fn contract_field(path: &str, field: &str) -> String {
+    format!("{path}.{field}")
 }
 
 fn preview_case(case: &Case, state: &SimState, environment: &Environment) -> Option<PreviewInput> {

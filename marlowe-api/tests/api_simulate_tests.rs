@@ -120,6 +120,57 @@ async fn typecheck_explain_rejects_parse_errors() {
 }
 
 #[tokio::test]
+async fn simulate_step_returns_structured_error_for_invalid_json() {
+    let app = build_router();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "error");
+    assert_eq!(json["error"]["code"], "RequestError");
+    assert_eq!(json["error"]["subcode"], "InvalidJson");
+    assert_eq!(json["error"]["path"], "$.request");
+}
+
+#[tokio::test]
+async fn typecheck_explain_returns_structured_error_for_invalid_json() {
+    let app = build_router();
+    let request_body = json!({
+      "contract_yaml": "Close: {}",
+      "context": {
+        "known_accounts": ["not-a-party"]
+      }
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/typecheck/explain")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["error"]["code"], "RequestError");
+    assert_eq!(json["error"]["subcode"], "InvalidJson");
+    assert_eq!(json["error"]["path"], "$.request");
+}
+
+#[tokio::test]
 async fn typecheck_explain_applies_strict_context_definitions() {
     let app = build_router();
     let contract = r#"

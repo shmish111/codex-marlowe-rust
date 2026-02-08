@@ -493,7 +493,7 @@ When:
                     rule: TraceReduceRule::Pay,
                     contract_path,
                     ..
-                } if contract_path == "$"
+                } if contract_path == "$.cases[0].then"
             )));
             assert!(success.trace.iter().any(|step| matches!(
                 step,
@@ -590,4 +590,46 @@ Assert:
         .warnings
         .iter()
         .any(|w| matches!(w, TransactionWarning::AssertionFailed)));
+}
+
+#[test]
+fn trace_mode_uses_nested_contract_paths_for_reductions() {
+    let contract = parse(
+        r#"
+If:
+  cond: { "True": {} }
+  then:
+    Pay:
+      from: { Role: "Alice" }
+      to_party: { Role: "Bob" }
+      token: { Token: { currency_symbol: "", token_name: "" } }
+      amount: { Constant: 1 }
+      then: { Close: {} }
+  else: { Close: {} }
+"#,
+    );
+
+    let result =
+        simulate_transaction_with_trace(&contract, &SimState::default(), &tx(0, 10, vec![]), true);
+    match result {
+        SimTransactionResult::Success(success) => {
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::Reduced {
+                    rule: TraceReduceRule::IfBranch,
+                    contract_path,
+                    ..
+                } if contract_path == "$"
+            )));
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::Reduced {
+                    rule: TraceReduceRule::Pay,
+                    contract_path,
+                    ..
+                } if contract_path == "$.then"
+            )));
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
 }

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::{
+    extract::rejection::JsonRejection,
     extract::State,
     http::StatusCode,
     routing::{get, post},
@@ -521,8 +522,20 @@ pub fn openapi_json() -> Result<String, serde_json::Error> {
 )]
 pub async fn simulate_step_handler(
     _state: State<AppState>,
-    Json(request): Json<SimulateStepRequest>,
+    request: Result<Json<SimulateStepRequest>, JsonRejection>,
 ) -> (StatusCode, Json<SimulateStepResponse>) {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            return bad_request(
+                "RequestError",
+                "InvalidJson",
+                err.body_text(),
+                Some("$.request".to_owned()),
+                None,
+            )
+        }
+    };
     let contract = match parse_contract_yaml(&request.contract_yaml) {
         Ok(contract) => contract,
         Err(err) => {
@@ -674,8 +687,20 @@ pub async fn simulate_step_handler(
 )]
 pub async fn simulate_preview_handler(
     _state: State<AppState>,
-    Json(request): Json<SimulatePreviewRequest>,
+    request: Result<Json<SimulatePreviewRequest>, JsonRejection>,
 ) -> (StatusCode, Json<SimulatePreviewResponse>) {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            return preview_bad_request(
+                "RequestError",
+                "InvalidJson",
+                err.body_text(),
+                Some("$.request".to_owned()),
+                None,
+            )
+        }
+    };
     let contract = match parse_contract_yaml(&request.contract_yaml) {
         Ok(contract) => contract,
         Err(err) => {
@@ -831,8 +856,20 @@ pub async fn simulate_preview_handler(
 )]
 pub async fn typecheck_explain_handler(
     _state: State<AppState>,
-    Json(request): Json<TypecheckExplainRequest>,
+    request: Result<Json<TypecheckExplainRequest>, JsonRejection>,
 ) -> (StatusCode, Json<TypecheckExplainResponse>) {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            return typecheck_explain_bad_request(
+                "RequestError",
+                "InvalidJson",
+                err.body_text(),
+                Some("$.request".to_owned()),
+                None,
+            )
+        }
+    };
     let context = match map_typecheck_context_request(&request.context) {
         Ok(context) => context,
         Err(err) => {
