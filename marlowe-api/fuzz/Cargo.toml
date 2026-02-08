@@ -1,0 +1,26 @@
+[package]
+name = "marlowe-api-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+marlowe-api = { path = ".." }
+
+[[bin]]
+name = "parse_yaml"
+path = "fuzz_targets/parse_yaml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_and_typecheck"
+path = "fuzz_targets/parse_and_typecheck.rs"
+test = false
+doc = false
+bench = false

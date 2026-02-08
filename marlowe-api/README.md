@@ -44,3 +44,10 @@ Run mutation checks (optional, requires `cargo-mutants`):
 ```bash
 ./scripts/run-mutation-checks.sh
 ```
+
+Run fuzzing harnesses (optional, requires `cargo-fuzz`):
+
+```bash
+./scripts/run-fuzz.sh parse_yaml
+./scripts/run-fuzz.sh parse_and_typecheck
+```
