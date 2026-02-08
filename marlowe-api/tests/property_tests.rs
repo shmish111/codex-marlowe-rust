@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, fs, path::PathBuf};
 
 use marlowe_api::{parse_contract_yaml, type_check, PartyRef, TokenRef, TypeCheckContext};
 use proptest::prelude::*;
@@ -49,6 +49,33 @@ fn context_from_mask(mask: u8) -> TypeCheckContext {
         known_choices: HashSet::new(),
         require_known_definitions: true,
     }
+}
+
+fn example_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("examples")
+        .join(name)
+}
+
+fn inferred_hole_types(result: &marlowe_api::TypeCheckResult) -> Vec<String> {
+    let mut types: Vec<String> = result
+        .holes
+        .iter()
+        .map(|s| s.ty.as_str().to_owned())
+        .collect();
+    types.sort();
+    types
+}
+
+fn inferred_param_types(result: &marlowe_api::TypeCheckResult) -> Vec<String> {
+    let mut types: Vec<String> = result
+        .params
+        .iter()
+        .map(|s| s.ty.as_str().to_owned())
+        .collect();
+    types.sort();
+    types
 }
 
 fn build_nested_let_contract(names: &[String]) -> String {
@@ -125,5 +152,40 @@ proptest! {
         let result = type_check(&contract, &TypeCheckContext::default());
 
         prop_assert!(!result.errors.iter().any(|e| e.message.contains("undefined let binding")));
+    }
+
+    #[test]
+    fn hole_alpha_renaming_preserves_inference(prefix in ident_strategy()) {
+        let base_yaml = fs::read_to_string(example_path("with-holes.yaml")).expect("example exists");
+        let base_contract = parse_contract_yaml(&base_yaml).expect("base parses");
+        let base_result = type_check(&base_contract, &TypeCheckContext::default());
+
+        let renamed_yaml = base_yaml
+            .replace("?deposit_amount", &format!("?{prefix}_deposit_amount"))
+            .replace("?continuation", &format!("?{prefix}_continuation"))
+            .replace("?deadline", &format!("?{prefix}_deadline"));
+        let renamed_contract = parse_contract_yaml(&renamed_yaml).expect("renamed parses");
+        let renamed_result = type_check(&renamed_contract, &TypeCheckContext::default());
+
+        prop_assert_eq!(base_result.errors.len(), renamed_result.errors.len());
+        prop_assert_eq!(base_result.warnings.len(), renamed_result.warnings.len());
+        prop_assert_eq!(inferred_hole_types(&base_result), inferred_hole_types(&renamed_result));
+    }
+
+    #[test]
+    fn param_alpha_renaming_preserves_inference(prefix in ident_strategy()) {
+        let base_yaml = fs::read_to_string(example_path("with-params.yaml")).expect("example exists");
+        let base_contract = parse_contract_yaml(&base_yaml).expect("base parses");
+        let base_result = type_check(&base_contract, &TypeCheckContext::default());
+
+        let renamed_yaml = base_yaml
+            .replace("$deposit_amt", &format!("${prefix}_deposit_amt"))
+            .replace("$deadline", &format!("${prefix}_deadline"));
+        let renamed_contract = parse_contract_yaml(&renamed_yaml).expect("renamed parses");
+        let renamed_result = type_check(&renamed_contract, &TypeCheckContext::default());
+
+        prop_assert_eq!(base_result.errors.len(), renamed_result.errors.len());
+        prop_assert_eq!(base_result.warnings.len(), renamed_result.warnings.len());
+        prop_assert_eq!(inferred_param_types(&base_result), inferred_param_types(&renamed_result));
     }
 }
