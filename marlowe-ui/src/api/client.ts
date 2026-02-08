@@ -81,6 +81,15 @@ export type SimulationStepResponse = {
   summary: string;
   warnings: string[];
   context: SimulationContext;
+  traceEvents: SimulationTraceEvent[];
+};
+
+export type SimulationTraceEvent = {
+  eventId: string;
+  code: string;
+  contractPath: string;
+  label: string;
+  warningCode?: string;
 };
 
 type ApiDiagnostic = {
@@ -143,8 +152,45 @@ type ApiSimulateStepResponse = {
     contract_yaml: string;
     state: ApiSimulateState;
     warnings: Array<{ code?: string }>;
+    trace?: ApiTraceEvent[] | null;
   } | null;
 };
+
+type ApiTraceInput =
+  | {
+      kind: 'choice';
+      id: Record<string, unknown>;
+      value: string;
+    }
+  | {
+      kind: 'deposit';
+      by: Record<string, unknown>;
+      into: Record<string, unknown>;
+      token: Record<string, unknown>;
+      amount: string;
+    }
+  | {
+      kind: 'notify';
+    };
+
+type ApiTraceEventReduced = {
+  event_id: string;
+  code: 'Reduced';
+  contract_path: string;
+  rule: string;
+  warning?: { code?: string } | null;
+};
+
+type ApiTraceEventInputApplied = {
+  event_id: string;
+  code: 'InputApplied';
+  contract_path: string;
+  input_index: number;
+  input: ApiTraceInput;
+  warning?: { code?: string } | null;
+};
+
+type ApiTraceEvent = ApiTraceEventReduced | ApiTraceEventInputApplied;
 
 type ApiTypecheckExplainItem = {
   code: string;
@@ -229,6 +275,45 @@ function getChoiceName(id: Record<string, unknown>): string {
   }
 
   return 'Unnamed choice';
+}
+
+function traceInputLabel(input: ApiTraceInput): string {
+  if (input.kind === 'choice') {
+    const choiceName = getChoiceName(input.id);
+    return `choice ${choiceName}=${input.value}`;
+  }
+
+  if (input.kind === 'deposit') {
+    return `deposit amount=${input.amount}`;
+  }
+
+  return 'notify';
+}
+
+function mapTraceEvents(trace: ApiTraceEvent[] | null | undefined): SimulationTraceEvent[] {
+  if (!trace || trace.length === 0) {
+    return [];
+  }
+
+  return trace.map((event) => {
+    if (event.code === 'InputApplied') {
+      return {
+        eventId: event.event_id,
+        code: event.code,
+        contractPath: event.contract_path,
+        label: `Input applied: ${traceInputLabel(event.input)}`,
+        warningCode: event.warning?.code
+      };
+    }
+
+    return {
+      eventId: event.event_id,
+      code: event.code,
+      contractPath: event.contract_path,
+      label: `Reduced: ${event.rule}`,
+      warningCode: event.warning?.code
+    };
+  });
 }
 
 function mapPreviewErrorToMessages(error: ApiSimulatePreviewResponse['error']): string[] {
@@ -447,6 +532,7 @@ export async function simulateStep(
   const response = await requestJson<ApiSimulateStepResponse>('/api/simulate/step', {
     contract_yaml: context.contractYaml,
     state: context.state ?? undefined,
+    trace: true,
     transaction: {
       interval_start: context.minTime,
       interval_end: context.minTime,
@@ -465,9 +551,11 @@ export async function simulateStep(
   const warningCodes =
     response.data.success?.warnings?.map((warning) => warning.code ?? 'Warning') ?? [];
   const nextState = response.data.success?.state ?? context.state;
+  const traceEvents = mapTraceEvents(response.data.success?.trace);
   return {
     summary: 'Simulation step applied',
     warnings: warningCodes,
+    traceEvents,
     context: {
       contractYaml: response.data.success?.contract_yaml ?? context.contractYaml,
       state: nextState,

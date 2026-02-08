@@ -202,12 +202,14 @@ describe('api client', () => {
     );
 
     expect(result.context.contractYaml).toBe('after-step');
+    expect(result.traceEvents).toEqual([]);
     expect(fetchMock).toHaveBeenCalledWith('/api/simulate/step', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contract_yaml: 'contract-code',
         state: { min_time: '10' },
+        trace: true,
         transaction: {
           interval_start: '10',
           interval_end: '10',
@@ -222,5 +224,68 @@ describe('api client', () => {
         }
       })
     });
+  });
+
+  it('maps trace events from simulation step', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'after-step',
+          state: { min_time: '11' },
+          warnings: [],
+          trace: [
+            {
+              event_id: 'evt-1',
+              code: 'InputApplied',
+              contract_path: '$.When',
+              input_index: 0,
+              input: {
+                kind: 'choice',
+                id: { ChoiceId: { name: 'MakeChoice', party: { Role: 'Alice' } } },
+                value: '3'
+              }
+            },
+            {
+              event_id: 'evt-2',
+              code: 'Reduced',
+              contract_path: '$.When.then',
+              rule: 'ReducePay'
+            }
+          ]
+        }
+      })
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await simulateStep(
+      { contractYaml: 'contract-code', state: { min_time: '10' }, minTime: '10' },
+      {
+        kind: 'choice',
+        id: { ChoiceId: { name: 'MakeChoice', party: { Role: 'Alice' } } },
+        name: 'MakeChoice',
+        bounds: [{ from: '1', to: '5' }]
+      },
+      '3'
+    );
+
+    expect(result.traceEvents).toEqual([
+      {
+        eventId: 'evt-1',
+        code: 'InputApplied',
+        contractPath: '$.When',
+        label: 'Input applied: choice MakeChoice=3',
+        warningCode: undefined
+      },
+      {
+        eventId: 'evt-2',
+        code: 'Reduced',
+        contractPath: '$.When.then',
+        label: 'Reduced: ReducePay',
+        warningCode: undefined
+      }
+    ]);
   });
 });

@@ -4,6 +4,7 @@ import { simulateContract, simulateStep, validateContract } from './api/client';
 import type {
   SimulationInput,
   SimulationResponse,
+  SimulationTraceEvent,
   ValidationDiagnostic,
   ValidationExplainItem,
   ValidationSummary
@@ -127,6 +128,7 @@ export default function App() {
   const [apiMessage, setApiMessage] = useState('API is not connected.');
   const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
+  const [simulationTrace, setSimulationTrace] = useState<SimulationTraceEvent[]>([]);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
   const [selectedInputKey, setSelectedInputKey] = useState<string>('');
@@ -280,6 +282,7 @@ export default function App() {
 
     setSimulationRunning(true);
     setSimulationState({ status: 'loading' });
+    setSimulationTrace([]);
     try {
       await runPreview(code);
     } catch (error) {
@@ -381,6 +384,9 @@ export default function App() {
         selectedSimulationInput,
         choiceValue
       );
+      if (stepResult.traceEvents.length > 0) {
+        setSimulationTrace((previous) => [...previous, ...stepResult.traceEvents]);
+      }
       await runPreview(stepResult.context.contractYaml, stepResult.context.state);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -810,6 +816,22 @@ export default function App() {
                     ))}
                   </ul>
                 )}
+                {simulationTrace.length > 0 ? (
+                  <div className="panel-block">
+                    <p className="panel-result">Trace</p>
+                    <ul className="panel-list">
+                      {simulationTrace.map((event) => (
+                        <li key={event.eventId}>
+                          <strong>{event.label}</strong>
+                          <span className="panel-hint">{event.contractPath}</span>
+                          {event.warningCode ? (
+                            <span className="panel-hint">Warning: {event.warningCode}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </section>

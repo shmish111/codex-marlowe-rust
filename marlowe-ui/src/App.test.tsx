@@ -207,7 +207,20 @@ describe('App', () => {
         success: {
           contract_yaml: 'v2',
           state: { min_time: '11' },
-          warnings: []
+          warnings: [],
+          trace: [
+            {
+              event_id: 'evt-1',
+              code: 'InputApplied',
+              contract_path: '$.When',
+              input_index: 0,
+              input: {
+                kind: 'choice',
+                id: { ChoiceId: { name: 'FirstChoice', party: { Role: 'Alice' } } },
+                value: '3'
+              }
+            }
+          ]
         },
         error: null
       })
@@ -250,5 +263,6 @@ describe('App', () => {
       await screen.findByText('Preview succeeded with 1 available input(s)')
     ).toBeInTheDocument();
     expect(await screen.findByLabelText('Available input')).toHaveTextContent('SecondChoice');
+    expect(await screen.findByText('Input applied: choice FirstChoice=3')).toBeInTheDocument();
   });
 });
