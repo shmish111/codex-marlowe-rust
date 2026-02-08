@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { simulateContract, validateContract } from './api/client';
+import { simulateChoiceStep, simulateContract, validateContract } from './api/client';
 import './styles.css';
 
 const OPEN_API_URL = 'http://127.0.0.1:3000/openapi.json';
@@ -23,7 +23,17 @@ type ValidationState =
 type SimulationState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'success'; summary: string; warnings: string[] }
+  | {
+      status: 'success';
+      summary: string;
+      warnings: string[];
+      choices: Array<{
+        id: Record<string, unknown>;
+        name: string;
+        bounds: Array<{ from: string; to: string }>;
+      }>;
+      contractYaml: string;
+    }
   | { status: 'error'; message: string };
 
 export default function App() {
@@ -39,6 +49,8 @@ export default function App() {
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
   const [isValidationRunning, setValidationRunning] = useState(false);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
+  const [selectedChoiceKey, setSelectedChoiceKey] = useState<string>('');
+  const [choiceValue, setChoiceValue] = useState<string>('0');
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
 
@@ -136,7 +148,58 @@ export default function App() {
     setSimulationState({ status: 'loading' });
     try {
       const result = await simulateContract(code);
-      setSimulationState({ status: 'success', summary: result.summary, warnings: result.warnings });
+      setSimulationState({
+        status: 'success',
+        summary: result.summary,
+        warnings: result.warnings,
+        choices: result.choices,
+        contractYaml: result.contractYaml
+      });
+      if (result.choices[0]) {
+        setSelectedChoiceKey(JSON.stringify(result.choices[0].id));
+        setChoiceValue(result.choices[0].bounds[0]?.from ?? '0');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setSimulationState({ status: 'error', message });
+    } finally {
+      setSimulationRunning(false);
+    }
+  };
+
+  const handleApplyChoice = async () => {
+    if (simulationState.status !== 'success') {
+      return;
+    }
+
+    const selectedChoice = simulationState.choices.find(
+      (choice) => JSON.stringify(choice.id) === selectedChoiceKey
+    );
+
+    if (!selectedChoice) {
+      return;
+    }
+
+    setSimulationRunning(true);
+    setSimulationState({ status: 'loading' });
+    try {
+      const stepResult = await simulateChoiceStep(
+        simulationState.contractYaml,
+        selectedChoice.id,
+        choiceValue
+      );
+      const nextPreview = await simulateContract(stepResult.contractYaml);
+      setSimulationState({
+        status: 'success',
+        summary: `${stepResult.summary}. ${nextPreview.summary}`,
+        warnings: [...stepResult.warnings, ...nextPreview.warnings],
+        choices: nextPreview.choices,
+        contractYaml: nextPreview.contractYaml
+      });
+      if (nextPreview.choices[0]) {
+        setSelectedChoiceKey(JSON.stringify(nextPreview.choices[0].id));
+        setChoiceValue(nextPreview.choices[0].bounds[0]?.from ?? '0');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setSimulationState({ status: 'error', message });
@@ -303,6 +366,48 @@ export default function App() {
               {simulationState.status === 'success' ? (
                 <div className="panel-block">
                   <p className="panel-result">{simulationState.summary}</p>
+                  {simulationState.choices.length > 0 ? (
+                    <div className="choice-form">
+                      <label className="choice-form__label" htmlFor="choice-select">
+                        Choice input
+                      </label>
+                      <select
+                        id="choice-select"
+                        className="choice-form__select"
+                        value={selectedChoiceKey}
+                        onChange={(event) => setSelectedChoiceKey(event.target.value)}
+                      >
+                        {simulationState.choices.map((choice) => {
+                          const key = JSON.stringify(choice.id);
+                          const bounds = choice.bounds
+                            .map((bound) => `${bound.from}..${bound.to}`)
+                            .join(', ');
+                          return (
+                            <option key={key} value={key}>
+                              {choice.name} ({bounds})
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <label className="choice-form__label" htmlFor="choice-value">
+                        Choice value
+                      </label>
+                      <input
+                        id="choice-value"
+                        className="choice-form__input"
+                        value={choiceValue}
+                        onChange={(event) => setChoiceValue(event.target.value)}
+                      />
+                      <button
+                        className="panel-action"
+                        type="button"
+                        disabled={isSimulationRunning}
+                        onClick={handleApplyChoice}
+                      >
+                        Apply choice
+                      </button>
+                    </div>
+                  ) : null}
                   {simulationState.warnings.length === 0 ? (
                     <div className="panel-badge panel-badge--ok">No warnings</div>
                   ) : (

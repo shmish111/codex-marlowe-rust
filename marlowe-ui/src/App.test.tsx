@@ -101,7 +101,7 @@ describe('App', () => {
     });
   });
 
-  it('runs simulation stub request', async () => {
+  it('runs simulation and allows applying a choice input', async () => {
     const fetchMock = vi.fn();
     mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
@@ -110,7 +110,37 @@ describe('App', () => {
     });
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => ({ result: 'ok', success: { inputs: [{}] }, error: null })
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'preview-contract',
+          inputs: [
+            {
+              choice: {
+                id: { ChoiceId: { name: 'PickNumber', party: { Role: 'Alice' } } },
+                bounds: [{ from: '1', to: '5' }]
+              }
+            }
+          ]
+        },
+        error: null
+      })
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: { contract_yaml: 'after-step', warnings: [] },
+        error: null
+      })
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: { contract_yaml: 'after-step', inputs: [] },
+        error: null
+      })
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -126,7 +156,14 @@ describe('App', () => {
     expect(
       await screen.findByText('Preview succeeded with 1 available input(s)')
     ).toBeInTheDocument();
-    expect(await screen.findByText('No warnings')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Choice input')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Choice value')).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Choice value'));
+    await user.type(screen.getByLabelText('Choice value'), '3');
+    await user.click(screen.getByRole('button', { name: /apply choice/i }));
+
+    expect(await screen.findByText(/Simulation step applied/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -134,6 +171,25 @@ describe('App', () => {
         contract_yaml: 'test',
         interval_start: '0',
         interval_end: '0'
+      })
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/simulate/step', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'preview-contract',
+        transaction: {
+          interval_start: '0',
+          interval_end: '0',
+          inputs: [
+            {
+              choice: {
+                id: { ChoiceId: { name: 'PickNumber', party: { Role: 'Alice' } } },
+                value: '3'
+              }
+            }
+          ]
+        }
       })
     });
   });
