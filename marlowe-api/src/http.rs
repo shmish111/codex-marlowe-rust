@@ -190,8 +190,12 @@ pub struct SimulateErrorResponse {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorDiagnosticResponse {
     pub code: String,
+    pub subcode: String,
     pub path: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schema(value_type = Object)]
+    pub details: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -353,31 +357,43 @@ pub async fn simulate_step_handler(
         let mut diagnostics = Vec::new();
         for error in &validation.errors {
             diagnostics.push(ErrorDiagnosticResponse {
-                code: "TypeError".to_owned(),
+                code: "Validation".to_owned(),
+                subcode: "TypeError".to_owned(),
                 path: error.path.clone(),
                 message: error.message.clone(),
+                details: BTreeMap::new(),
             });
         }
         for hole in &validation.holes {
+            let mut details = BTreeMap::new();
+            details.insert("name".to_owned(), hole.name.clone());
+            details.insert("type".to_owned(), hole.ty.as_str().to_owned());
             diagnostics.push(ErrorDiagnosticResponse {
-                code: "Hole".to_owned(),
+                code: "Validation".to_owned(),
+                subcode: "HoleUnresolved".to_owned(),
                 path: hole.path.clone(),
                 message: format!(
                     "hole '{}' has inferred type {}",
                     hole.name,
                     hole.ty.as_str()
                 ),
+                details,
             });
         }
         for param in &validation.params {
+            let mut details = BTreeMap::new();
+            details.insert("name".to_owned(), param.name.clone());
+            details.insert("type".to_owned(), param.ty.as_str().to_owned());
             diagnostics.push(ErrorDiagnosticResponse {
-                code: "Param".to_owned(),
+                code: "Validation".to_owned(),
+                subcode: "ParamUnresolved".to_owned(),
                 path: param.path.clone(),
                 message: format!(
                     "parameter '{}' has inferred type {} and must be instantiated",
                     param.name,
                     param.ty.as_str()
                 ),
+                details,
             });
         }
         return bad_request(
@@ -470,31 +486,43 @@ pub async fn simulate_preview_handler(
         let mut diagnostics = Vec::new();
         for error in &validation.errors {
             diagnostics.push(ErrorDiagnosticResponse {
-                code: "TypeError".to_owned(),
+                code: "Validation".to_owned(),
+                subcode: "TypeError".to_owned(),
                 path: error.path.clone(),
                 message: error.message.clone(),
+                details: BTreeMap::new(),
             });
         }
         for hole in &validation.holes {
+            let mut details = BTreeMap::new();
+            details.insert("name".to_owned(), hole.name.clone());
+            details.insert("type".to_owned(), hole.ty.as_str().to_owned());
             diagnostics.push(ErrorDiagnosticResponse {
-                code: "Hole".to_owned(),
+                code: "Validation".to_owned(),
+                subcode: "HoleUnresolved".to_owned(),
                 path: hole.path.clone(),
                 message: format!(
                     "hole '{}' has inferred type {}",
                     hole.name,
                     hole.ty.as_str()
                 ),
+                details,
             });
         }
         for param in &validation.params {
+            let mut details = BTreeMap::new();
+            details.insert("name".to_owned(), param.name.clone());
+            details.insert("type".to_owned(), param.ty.as_str().to_owned());
             diagnostics.push(ErrorDiagnosticResponse {
-                code: "Param".to_owned(),
+                code: "Validation".to_owned(),
+                subcode: "ParamUnresolved".to_owned(),
                 path: param.path.clone(),
                 message: format!(
                     "parameter '{}' has inferred type {} and must be instantiated",
                     param.name,
                     param.ty.as_str()
                 ),
+                details,
             });
         }
         return preview_bad_request(

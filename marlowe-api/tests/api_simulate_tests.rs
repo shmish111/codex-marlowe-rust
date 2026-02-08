@@ -149,7 +149,7 @@ async fn simulate_step_rejects_uninstantiated_contract() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|d| d["code"] == "Param"));
+        .any(|d| d["subcode"] == "ParamUnresolved" && d["code"] == "Validation"));
 }
 
 #[tokio::test]
