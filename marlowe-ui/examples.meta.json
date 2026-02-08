@@ -1,0 +1,34 @@
+{
+  "simple-pay.yaml": {
+    "name": "Simple Pay",
+    "description": "Minimal payment contract with a single transfer."
+  },
+  "choice-with-let.yaml": {
+    "name": "Choice With Let",
+    "description": "Demonstrates decision branches and local bindings."
+  },
+  "escrow.yaml": {
+    "name": "Escrow",
+    "description": "Escrow arrangement with dispute resolution."
+  },
+  "swap.yaml": {
+    "name": "Swap",
+    "description": "Asset swap between two parties."
+  },
+  "simple-deposit.yaml": {
+    "name": "Simple Deposit",
+    "description": "Single deposit example with a clean exit."
+  },
+  "with-params.yaml": {
+    "name": "With Params",
+    "description": "Parameterized contract showing reusable values."
+  },
+  "loan-zero-coupon.yaml": {
+    "name": "Zero Coupon Loan",
+    "description": "Loan with repayment schedule and no coupons."
+  },
+  "with-holes.yaml": {
+    "name": "With Holes",
+    "description": "Template placeholders for partially specified contracts."
+  }
+}
