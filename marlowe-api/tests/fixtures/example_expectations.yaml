@@ -1,0 +1,54 @@
+expectations:
+  simple-pay.yaml:
+    ready_to_run: true
+    errors: 0
+    warnings: 0
+    holes: []
+    params: []
+  simple-deposit.yaml:
+    ready_to_run: true
+    errors: 0
+    warnings: 0
+    holes: []
+    params: []
+  swap.yaml:
+    ready_to_run: true
+    errors: 0
+    warnings: 0
+    holes: []
+    params: []
+  escrow.yaml:
+    ready_to_run: true
+    errors: 0
+    warnings: 0
+    holes: []
+    params: []
+  loan-zero-coupon.yaml:
+    ready_to_run: true
+    errors: 0
+    warnings: 0
+    holes: []
+    params: []
+  choice-with-let.yaml:
+    ready_to_run: true
+    errors: 0
+    warnings: 1
+    holes: []
+    params: []
+  with-params.yaml:
+    ready_to_run: false
+    errors: 0
+    warnings: 0
+    holes: []
+    params:
+      - "Value:deposit_amt"
+      - "Timeout:deadline"
+  with-holes.yaml:
+    ready_to_run: false
+    errors: 0
+    warnings: 0
+    holes:
+      - "Contract:continuation"
+      - "Timeout:deadline"
+      - "Value:deposit_amount"
+    params: []
