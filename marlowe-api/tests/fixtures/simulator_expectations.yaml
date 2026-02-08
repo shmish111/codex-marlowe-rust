@@ -1,0 +1,17 @@
+expectations:
+  with-params.yaml:
+    expected: error
+    error_code: NotReadyToRun
+  with-holes.yaml:
+    expected: error
+    error_code: NotReadyToRun
+  simple-deposit.yaml:
+    expected: error
+    error_code: AmbiguousTimeInterval
+  simple-pay.yaml:
+    expected: success
+    payments: 1
+    first_payment_amount: "10"
+  swap.yaml:
+    expected: error
+    error_code: UselessTransaction
