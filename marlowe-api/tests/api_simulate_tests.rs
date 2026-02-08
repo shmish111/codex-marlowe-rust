@@ -170,6 +170,80 @@ Pay:
     assert_eq!(trace[0]["warning"]["expected"], "10");
     assert_eq!(trace[0]["warning"]["paid"], "3");
     assert_eq!(trace[0]["payment"]["amount"], "3");
+    assert_eq!(
+        trace[0]["delta"]["accounts_removed"][0]["owner"],
+        json!({"Role": "Alice"})
+    );
+    assert_eq!(
+        trace[0]["delta"]["accounts_removed"][0]["token"],
+        json!({"Token": {"currency_symbol": "", "token_name": ""}})
+    );
+    assert!(trace[0]["delta"].get("accounts_upserted").is_none());
+}
+
+#[tokio::test]
+async fn simulate_step_trace_mode_includes_input_state_delta() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Alice" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 5 }
+        then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "trace": true,
+      "transaction": {
+        "interval_start": "0",
+        "interval_end": "10",
+        "inputs": [
+          {
+            "deposit": {
+              "into": {"Role": "Alice"},
+              "by": {"Role": "Alice"},
+              "token": {"Token": {"currency_symbol": "", "token_name": ""}},
+              "amount": "5"
+            }
+          }
+        ]
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    let trace = json["success"]["trace"].as_array().expect("trace array");
+    let input_event = trace
+        .iter()
+        .find(|event| event["code"] == "InputApplied")
+        .expect("input event");
+    assert_eq!(input_event["input_index"], 0);
+    assert_eq!(input_event["input"]["kind"], "deposit");
+    assert_eq!(input_event["delta"]["accounts_upserted"][0]["amount"], "5");
+    assert_eq!(
+        input_event["delta"]["accounts_upserted"][0]["owner"],
+        json!({"Role": "Alice"})
+    );
 }
 
 #[tokio::test]

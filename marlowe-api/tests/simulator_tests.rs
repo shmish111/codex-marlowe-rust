@@ -490,6 +490,77 @@ When:
                     ..
                 }
             )));
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::InputApplied {
+                    delta: Some(delta),
+                    ..
+                } if !delta.accounts_upserted.is_empty()
+            )));
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::Reduced {
+                    rule: TraceReduceRule::Pay,
+                    delta: Some(delta),
+                    ..
+                } if !delta.accounts_removed.is_empty()
+            )));
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn trace_mode_reports_bound_value_upsert_for_let() {
+    let contract = parse(
+        r#"
+Let:
+  name: "x"
+  value: { Constant: 7 }
+  then: { Close: {} }
+"#,
+    );
+
+    let result =
+        simulate_transaction_with_trace(&contract, &SimState::default(), &tx(0, 10, vec![]), true);
+    match result {
+        SimTransactionResult::Success(success) => {
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::Reduced {
+                    rule: TraceReduceRule::Let,
+                    delta: Some(delta),
+                    ..
+                } if delta.bound_values_upserted.iter().any(|entry| entry.name == "x")
+            )));
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
+
+#[test]
+fn trace_mode_timeout_step_has_no_state_delta() {
+    let contract = parse(
+        r#"
+When:
+  cases: []
+  timeout: { Timeout: 10 }
+  timeout_continuation: { Close: {} }
+"#,
+    );
+
+    let result =
+        simulate_transaction_with_trace(&contract, &SimState::default(), &tx(10, 12, vec![]), true);
+    match result {
+        SimTransactionResult::Success(success) => {
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::Reduced {
+                    rule: TraceReduceRule::WhenTimeout,
+                    delta: None,
+                    ..
+                }
+            )));
         }
         other => panic!("unexpected result: {other:?}"),
     }

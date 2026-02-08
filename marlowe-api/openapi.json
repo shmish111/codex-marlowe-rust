@@ -189,6 +189,21 @@
           }
         }
       },
+      "AccountTargetResponse": {
+        "type": "object",
+        "required": [
+          "owner",
+          "token"
+        ],
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/Party"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
       "BigIntValue": {
         "oneOf": [
           {
@@ -904,6 +919,16 @@
                   "Reduced"
                 ]
               },
+              "delta": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TraceStateDeltaResponse"
+                  }
+                ]
+              },
               "payment": {
                 "oneOf": [
                   {
@@ -941,6 +966,16 @@
                 "type": "string",
                 "enum": [
                   "InputApplied"
+                ]
+              },
+              "delta": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TraceStateDeltaResponse"
+                  }
                 ]
               },
               "input": {
@@ -1033,6 +1068,75 @@
             }
           }
         ]
+      },
+      "TraceMinTimeDeltaResponse": {
+        "type": "object",
+        "required": [
+          "before",
+          "after"
+        ],
+        "properties": {
+          "after": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string"
+          }
+        }
+      },
+      "TraceStateDeltaResponse": {
+        "type": "object",
+        "properties": {
+          "accounts_removed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountTargetResponse"
+            }
+          },
+          "accounts_upserted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountBalanceResponse"
+            }
+          },
+          "bound_values_removed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bound_values_upserted": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "choices_removed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChoiceId"
+            }
+          },
+          "choices_upserted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChoiceValueResponse"
+            }
+          },
+          "min_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TraceMinTimeDeltaResponse"
+              }
+            ]
+          }
+        }
       },
       "WarningResponse": {
         "oneOf": [

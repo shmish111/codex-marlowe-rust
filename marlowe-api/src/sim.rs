@@ -111,12 +111,49 @@ pub enum TraceStep {
         rule: TraceReduceRule,
         warning: Option<TransactionWarning>,
         payment: Option<Payment>,
+        delta: Option<StateDelta>,
     },
     InputApplied {
         input_index: usize,
         input: SimInput,
         warning: Option<TransactionWarning>,
+        delta: Option<StateDelta>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateDelta {
+    pub accounts_upserted: Vec<AccountDelta>,
+    pub accounts_removed: Vec<AccountId>,
+    pub choices_upserted: Vec<ChoiceDelta>,
+    pub choices_removed: Vec<ChoiceId>,
+    pub bound_values_upserted: Vec<BoundValueDelta>,
+    pub bound_values_removed: Vec<String>,
+    pub min_time: Option<MinTimeDelta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountDelta {
+    pub account: AccountId,
+    pub amount: BigInt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChoiceDelta {
+    pub id: ChoiceId,
+    pub value: BigInt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundValueDelta {
+    pub name: String,
+    pub value: BigInt,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MinTimeDelta {
+    pub before: BigInt,
+    pub after: BigInt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,6 +386,7 @@ fn apply_all_inputs(
                     input_index: index,
                     input: input.clone(),
                     warning: Some(warning),
+                    delta: state_delta(&current_state, &applied.state),
                 });
             }
         } else if include_trace {
@@ -356,6 +394,7 @@ fn apply_all_inputs(
                 input_index: index,
                 input: input.clone(),
                 warning: None,
+                delta: state_delta(&current_state, &applied.state),
             });
         }
         current_state = applied.state;
@@ -430,6 +469,7 @@ fn reduce_until_quiescent(
                         rule: step.rule.clone(),
                         warning: step.warning.clone(),
                         payment: step.payment.clone(),
+                        delta: state_delta(&current_state, &step.state),
                     });
                 }
                 current_state = step.state;
@@ -821,6 +861,94 @@ fn eval_timeout(timeout: &Timeout) -> BigInt {
     match timeout {
         Timeout::PosixTime(value) => value.clone(),
         Timeout::Param(_) | Timeout::Hole(_) => BigInt::zero(),
+    }
+}
+
+fn state_delta(before: &SimState, after: &SimState) -> Option<StateDelta> {
+    let mut accounts_upserted = Vec::new();
+    for (account, after_amount) in &after.accounts {
+        let changed = before.accounts.get(account) != Some(after_amount);
+        if changed {
+            accounts_upserted.push(AccountDelta {
+                account: account.clone(),
+                amount: after_amount.clone(),
+            });
+        }
+    }
+
+    let mut accounts_removed = Vec::new();
+    for account in before.accounts.keys() {
+        if !after.accounts.contains_key(account) {
+            accounts_removed.push(account.clone());
+        }
+    }
+
+    let mut choices_upserted = Vec::new();
+    for (id, after_value) in &after.choices {
+        let changed = before.choices.get(id) != Some(after_value);
+        if changed {
+            choices_upserted.push(ChoiceDelta {
+                id: id.clone(),
+                value: after_value.clone(),
+            });
+        }
+    }
+
+    let mut choices_removed = Vec::new();
+    for id in before.choices.keys() {
+        if !after.choices.contains_key(id) {
+            choices_removed.push(id.clone());
+        }
+    }
+
+    let mut bound_values_upserted = Vec::new();
+    for (name, after_value) in &after.bound_values {
+        let changed = before.bound_values.get(name) != Some(after_value);
+        if changed {
+            bound_values_upserted.push(BoundValueDelta {
+                name: name.clone(),
+                value: after_value.clone(),
+            });
+        }
+    }
+
+    let mut bound_values_removed = Vec::new();
+    for name in before.bound_values.keys() {
+        if !after.bound_values.contains_key(name) {
+            bound_values_removed.push(name.clone());
+        }
+    }
+
+    let min_time = if before.min_time != after.min_time {
+        Some(MinTimeDelta {
+            before: before.min_time.clone(),
+            after: after.min_time.clone(),
+        })
+    } else {
+        None
+    };
+
+    let delta = StateDelta {
+        accounts_upserted,
+        accounts_removed,
+        choices_upserted,
+        choices_removed,
+        bound_values_upserted,
+        bound_values_removed,
+        min_time,
+    };
+
+    if delta.accounts_upserted.is_empty()
+        && delta.accounts_removed.is_empty()
+        && delta.choices_upserted.is_empty()
+        && delta.choices_removed.is_empty()
+        && delta.bound_values_upserted.is_empty()
+        && delta.bound_values_removed.is_empty()
+        && delta.min_time.is_none()
+    {
+        None
+    } else {
+        Some(delta)
     }
 }
 

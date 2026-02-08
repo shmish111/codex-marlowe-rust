@@ -15,8 +15,8 @@ use crate::{
     contract_to_yaml_string, parse_contract_yaml,
     sim::{
         preview_inputs, simulate_transaction_with_trace, AccountId, Payment, PreviewInput,
-        SimError, SimInput, SimState, SimTransaction, SimTransactionResult, TraceReduceRule,
-        TraceStep, TransactionWarning,
+        SimError, SimInput, SimState, SimTransaction, SimTransactionResult, StateDelta,
+        TraceReduceRule, TraceStep, TransactionWarning,
     },
     type_check, TypeCheckContext,
 };
@@ -243,12 +243,16 @@ pub enum TraceEventResponse {
         warning: Option<WarningResponse>,
         #[serde(skip_serializing_if = "Option::is_none")]
         payment: Option<PaymentResponse>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delta: Option<TraceStateDeltaResponse>,
     },
     InputApplied {
         input_index: usize,
         input: TraceInputResponse,
         #[serde(skip_serializing_if = "Option::is_none")]
         warning: Option<WarningResponse>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        delta: Option<TraceStateDeltaResponse>,
     },
 }
 
@@ -266,6 +270,36 @@ pub enum TraceInputResponse {
         value: String,
     },
     Notify,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TraceStateDeltaResponse {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accounts_upserted: Vec<AccountBalanceResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accounts_removed: Vec<AccountTargetResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices_upserted: Vec<ChoiceValueResponse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices_removed: Vec<ChoiceId>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bound_values_upserted: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bound_values_removed: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_time: Option<TraceMinTimeDeltaResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AccountTargetResponse {
+    pub owner: Party,
+    pub token: Token,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TraceMinTimeDeltaResponse {
+    pub before: String,
+    pub after: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -802,20 +836,68 @@ fn trace_step_to_response(step: &TraceStep) -> TraceEventResponse {
             rule,
             warning,
             payment,
+            delta,
         } => TraceEventResponse::Reduced {
             rule: trace_rule_name(rule).to_owned(),
             warning: warning.as_ref().map(warning_to_response),
             payment: payment.as_ref().map(payment_to_response),
+            delta: delta.as_ref().map(state_delta_to_response),
         },
         TraceStep::InputApplied {
             input_index,
             input,
             warning,
+            delta,
         } => TraceEventResponse::InputApplied {
             input_index: *input_index,
             input: trace_input_to_response(input),
             warning: warning.as_ref().map(warning_to_response),
+            delta: delta.as_ref().map(state_delta_to_response),
         },
+    }
+}
+
+fn state_delta_to_response(delta: &StateDelta) -> TraceStateDeltaResponse {
+    TraceStateDeltaResponse {
+        accounts_upserted: delta
+            .accounts_upserted
+            .iter()
+            .map(|entry| AccountBalanceResponse {
+                owner: entry.account.owner.clone(),
+                token: entry.account.token.clone(),
+                amount: entry.amount.to_string(),
+            })
+            .collect(),
+        accounts_removed: delta
+            .accounts_removed
+            .iter()
+            .map(|account| AccountTargetResponse {
+                owner: account.owner.clone(),
+                token: account.token.clone(),
+            })
+            .collect(),
+        choices_upserted: delta
+            .choices_upserted
+            .iter()
+            .map(|entry| ChoiceValueResponse {
+                id: entry.id.clone(),
+                value: entry.value.to_string(),
+            })
+            .collect(),
+        choices_removed: delta.choices_removed.clone(),
+        bound_values_upserted: delta
+            .bound_values_upserted
+            .iter()
+            .map(|entry| (entry.name.clone(), entry.value.to_string()))
+            .collect(),
+        bound_values_removed: delta.bound_values_removed.clone(),
+        min_time: delta
+            .min_time
+            .as_ref()
+            .map(|entry| TraceMinTimeDeltaResponse {
+                before: entry.before.to_string(),
+                after: entry.after.to_string(),
+            }),
     }
 }
 
