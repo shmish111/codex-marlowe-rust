@@ -18,6 +18,13 @@ const examples = [
   }
 ];
 
+function mockExamplesFetch(fetchMock: ReturnType<typeof vi.fn>) {
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => examples
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -25,11 +32,7 @@ afterEach(() => {
 describe('App', () => {
   it('loads examples and opens the modal', async () => {
     const fetchMock = vi.fn();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => examples
-    });
-
+    mockExamplesFetch(fetchMock);
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -45,15 +48,11 @@ describe('App', () => {
 
   it('connects to the OpenAPI endpoint', async () => {
     const fetchMock = vi.fn();
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => examples
-    });
+    mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
     });
-
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -66,26 +65,49 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:3000/openapi.json');
   });
 
-  it('shows an error when OpenAPI fetch fails', async () => {
+  it('runs validation stub request', async () => {
     const fetchMock = vi.fn();
+    mockExamplesFetch(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
-      json: async () => examples
+      json: async () => ({ valid: true, diagnostics: ['all good'] })
     });
-    fetchMock.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: async () => ({})
-    });
-
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
     expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /connect api/i }));
+    await user.click(screen.getByRole('button', { name: /run validation stub/i }));
 
-    expect(await screen.findByText('Connection failed: HTTP 500')).toBeInTheDocument();
+    expect(await screen.findByText('Valid. Diagnostics: all good')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'test' })
+    });
+  });
+
+  it('runs simulation stub request', async () => {
+    const fetchMock = vi.fn();
+    mockExamplesFetch(fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ summary: 'Simulation complete', warnings: [] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    expect(await screen.findByText('Simple Pay')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /run simulation stub/i }));
+
+    expect(await screen.findByText('Simulation complete. No warnings.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'test' })
+    });
   });
 });

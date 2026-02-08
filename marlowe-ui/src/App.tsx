@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
+import { simulateContract, validateContract } from './api/client';
 import './styles.css';
 
 const OPEN_API_URL = 'http://127.0.0.1:3000/openapi.json';
@@ -22,6 +23,10 @@ export default function App() {
   const [examplesError, setExamplesError] = useState<string | null>(null);
   const [apiStatus, setApiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [apiMessage, setApiMessage] = useState('Not connected');
+  const [validationResult, setValidationResult] = useState<string>('No validation run yet.');
+  const [simulationResult, setSimulationResult] = useState<string>('No simulation run yet.');
+  const [isValidationRunning, setValidationRunning] = useState(false);
+  const [isSimulationRunning, setSimulationRunning] = useState(false);
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
 
@@ -93,6 +98,46 @@ export default function App() {
       const message = error instanceof Error ? error.message : 'Unknown error';
       setApiStatus('error');
       setApiMessage(`Connection failed: ${message}`);
+    }
+  };
+
+  const handleValidate = async () => {
+    setValidationRunning(true);
+    setValidationResult('Validating...');
+    try {
+      const result = await validateContract(code);
+      const diagnostics = result.diagnostics.join(', ');
+      setValidationResult(
+        result.valid
+          ? diagnostics
+            ? `Valid. Diagnostics: ${diagnostics}`
+            : 'Valid with no diagnostics.'
+          : diagnostics
+            ? `Invalid. Diagnostics: ${diagnostics}`
+            : 'Invalid with no diagnostics.'
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setValidationResult(`Validation failed: ${message}`);
+    } finally {
+      setValidationRunning(false);
+    }
+  };
+
+  const handleSimulate = async () => {
+    setSimulationRunning(true);
+    setSimulationResult('Simulating...');
+    try {
+      const result = await simulateContract(code);
+      const warnings = result.warnings.join(', ');
+      setSimulationResult(
+        warnings ? `${result.summary}. Warnings: ${warnings}` : `${result.summary}. No warnings.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setSimulationResult(`Simulation failed: ${message}`);
+    } finally {
+      setSimulationRunning(false);
     }
   };
 
@@ -177,10 +222,28 @@ export default function App() {
             <div className="panel-card">
               <h3>Validation</h3>
               <p>Surface schema and logic checks in real-time.</p>
+              <button
+                className="panel-action"
+                type="button"
+                onClick={handleValidate}
+                disabled={isValidationRunning}
+              >
+                Run validation stub
+              </button>
+              <p className="panel-result">{validationResult}</p>
             </div>
             <div className="panel-card">
               <h3>Simulation</h3>
               <p>Preview outcomes once the backend API is connected.</p>
+              <button
+                className="panel-action"
+                type="button"
+                onClick={handleSimulate}
+                disabled={isSimulationRunning}
+              >
+                Run simulation stub
+              </button>
+              <p className="panel-result">{simulationResult}</p>
             </div>
           </div>
         </aside>
