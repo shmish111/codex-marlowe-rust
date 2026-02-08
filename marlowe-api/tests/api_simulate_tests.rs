@@ -216,8 +216,10 @@ Pay:
     let json = json_response(response).await;
     let trace = json["success"]["trace"].as_array().expect("trace array");
     assert!(!trace.is_empty());
+    assert_eq!(trace[0]["event_id"], "trace-0000");
     assert_eq!(trace[0]["code"], "Reduced");
     assert_eq!(trace[0]["rule"], "Pay");
+    assert_eq!(trace[0]["contract_path"], "$");
     assert_eq!(trace[0]["warning"]["code"], "PartialPay");
     assert_eq!(trace[0]["warning"]["expected"], "10");
     assert_eq!(trace[0]["warning"]["paid"], "3");
@@ -231,6 +233,11 @@ Pay:
         json!({"Token": {"currency_symbol": "", "token_name": ""}})
     );
     assert!(trace[0]["delta"].get("accounts_upserted").is_none());
+    assert!(trace[0]["state_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path == "$.accounts"));
 }
 
 #[tokio::test]
@@ -289,13 +296,20 @@ When:
         .iter()
         .find(|event| event["code"] == "InputApplied")
         .expect("input event");
+    assert_eq!(input_event["event_id"], "trace-0000");
     assert_eq!(input_event["input_index"], 0);
+    assert_eq!(input_event["contract_path"], "$.cases[0]");
     assert_eq!(input_event["input"]["kind"], "deposit");
     assert_eq!(input_event["delta"]["accounts_upserted"][0]["amount"], "5");
     assert_eq!(
         input_event["delta"]["accounts_upserted"][0]["owner"],
         json!({"Role": "Alice"})
     );
+    assert!(input_event["state_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path == "$.accounts"));
 }
 
 #[tokio::test]

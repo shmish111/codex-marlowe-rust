@@ -909,7 +909,9 @@
           {
             "type": "object",
             "required": [
+              "event_id",
               "rule",
+              "contract_path",
               "code"
             ],
             "properties": {
@@ -918,6 +920,9 @@
                 "enum": [
                   "Reduced"
                 ]
+              },
+              "contract_path": {
+                "type": "string"
               },
               "delta": {
                 "oneOf": [
@@ -928,6 +933,9 @@
                     "$ref": "#/components/schemas/TraceStateDeltaResponse"
                   }
                 ]
+              },
+              "event_id": {
+                "type": "string"
               },
               "payment": {
                 "oneOf": [
@@ -941,6 +949,12 @@
               },
               "rule": {
                 "type": "string"
+              },
+              "state_paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               "warning": {
                 "oneOf": [
@@ -957,7 +971,9 @@
           {
             "type": "object",
             "required": [
+              "event_id",
               "input_index",
+              "contract_path",
               "input",
               "code"
             ],
@@ -967,6 +983,9 @@
                 "enum": [
                   "InputApplied"
                 ]
+              },
+              "contract_path": {
+                "type": "string"
               },
               "delta": {
                 "oneOf": [
@@ -978,12 +997,21 @@
                   }
                 ]
               },
+              "event_id": {
+                "type": "string"
+              },
               "input": {
                 "$ref": "#/components/schemas/TraceInputResponse"
               },
               "input_index": {
                 "type": "integer",
                 "minimum": 0
+              },
+              "state_paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
               "warning": {
                 "oneOf": [

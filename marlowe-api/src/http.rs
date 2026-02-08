@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::{
     extract::State,
@@ -245,7 +245,11 @@ pub enum WarningResponse {
 #[serde(tag = "code")]
 pub enum TraceEventResponse {
     Reduced {
+        event_id: String,
         rule: String,
+        contract_path: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        state_paths: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         warning: Option<WarningResponse>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,7 +258,11 @@ pub enum TraceEventResponse {
         delta: Option<TraceStateDeltaResponse>,
     },
     InputApplied {
+        event_id: String,
         input_index: usize,
+        contract_path: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        state_paths: Vec<String>,
         input: TraceInputResponse,
         #[serde(skip_serializing_if = "Option::is_none")]
         warning: Option<WarningResponse>,
@@ -545,7 +553,14 @@ pub async fn simulate_step_handler(
             };
 
             let trace = if request.trace {
-                Some(success.trace.iter().map(trace_step_to_response).collect())
+                Some(
+                    success
+                        .trace
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, step)| trace_step_to_response(idx, step))
+                        .collect(),
+                )
             } else {
                 None
             };
@@ -837,31 +852,65 @@ fn warning_to_response(warning: &TransactionWarning) -> WarningResponse {
     }
 }
 
-fn trace_step_to_response(step: &TraceStep) -> TraceEventResponse {
+fn trace_step_to_response(index: usize, step: &TraceStep) -> TraceEventResponse {
+    let event_id = format!("trace-{index:04}");
     match step {
         TraceStep::Reduced {
             rule,
+            contract_path,
             warning,
             payment,
             delta,
         } => TraceEventResponse::Reduced {
+            event_id,
             rule: trace_rule_name(rule).to_owned(),
+            contract_path: contract_path.clone(),
+            state_paths: trace_state_paths(delta.as_ref()),
             warning: warning.as_ref().map(warning_to_response),
             payment: payment.as_ref().map(payment_to_response),
             delta: delta.as_ref().map(state_delta_to_response),
         },
         TraceStep::InputApplied {
             input_index,
+            contract_path,
             input,
             warning,
             delta,
         } => TraceEventResponse::InputApplied {
+            event_id,
             input_index: *input_index,
+            contract_path: contract_path.clone(),
+            state_paths: trace_state_paths(delta.as_ref()),
             input: trace_input_to_response(input),
             warning: warning.as_ref().map(warning_to_response),
             delta: delta.as_ref().map(state_delta_to_response),
         },
     }
+}
+
+fn trace_state_paths(delta: Option<&StateDelta>) -> Vec<String> {
+    let Some(delta) = delta else {
+        return Vec::new();
+    };
+
+    let mut paths = BTreeSet::new();
+    if !delta.accounts_upserted.is_empty() || !delta.accounts_removed.is_empty() {
+        paths.insert("$.accounts".to_owned());
+    }
+    if !delta.choices_upserted.is_empty() || !delta.choices_removed.is_empty() {
+        paths.insert("$.choices".to_owned());
+    }
+    for entry in &delta.bound_values_upserted {
+        paths.insert(format!("$.bound_values.{}", entry.name));
+    }
+    for entry in &delta.bound_values_removed {
+        paths.insert(format!("$.bound_values.{entry}"));
+    }
+    if delta.min_time.is_some() {
+        paths.insert("$.min_time".to_owned());
+    }
+
+    paths.into_iter().collect()
 }
 
 fn state_delta_to_response(delta: &StateDelta) -> TraceStateDeltaResponse {

@@ -109,12 +109,14 @@ pub enum TraceReduceRule {
 pub enum TraceStep {
     Reduced {
         rule: TraceReduceRule,
+        contract_path: String,
         warning: Option<TransactionWarning>,
         payment: Option<Payment>,
         delta: Option<StateDelta>,
     },
     InputApplied {
         input_index: usize,
+        contract_path: String,
         input: SimInput,
         warning: Option<TransactionWarning>,
         delta: Option<StateDelta>,
@@ -384,6 +386,7 @@ fn apply_all_inputs(
             if include_trace {
                 trace.push(TraceStep::InputApplied {
                     input_index: index,
+                    contract_path: applied.contract_path.clone(),
                     input: input.clone(),
                     warning: Some(warning),
                     delta: state_delta(&current_state, &applied.state),
@@ -392,6 +395,7 @@ fn apply_all_inputs(
         } else if include_trace {
             trace.push(TraceStep::InputApplied {
                 input_index: index,
+                contract_path: applied.contract_path.clone(),
                 input: input.clone(),
                 warning: None,
                 delta: state_delta(&current_state, &applied.state),
@@ -467,6 +471,7 @@ fn reduce_until_quiescent(
                 if include_trace {
                     trace.push(TraceStep::Reduced {
                         rule: step.rule.clone(),
+                        contract_path: "$".to_owned(),
                         warning: step.warning.clone(),
                         payment: step.payment.clone(),
                         delta: state_delta(&current_state, &step.state),
@@ -661,6 +666,7 @@ fn refund_one(state: &SimState) -> ReduceStep {
 }
 
 struct ApplyInputResult {
+    contract_path: String,
     warning: Option<TransactionWarning>,
     state: SimState,
     contract: Contract,
@@ -676,7 +682,7 @@ fn apply_input(
         return None;
     };
 
-    for case in cases {
+    for (case_index, case) in cases.iter().enumerate() {
         let Case::Case { action, then } = case else {
             continue;
         };
@@ -714,6 +720,7 @@ fn apply_input(
                         None
                     };
                     return Some(ApplyInputResult {
+                        contract_path: format!("$.cases[{case_index}]"),
                         warning,
                         state: new_state,
                         contract: (**then).clone(),
@@ -731,6 +738,7 @@ fn apply_input(
                     let mut new_state = state.clone();
                     new_state.choices.insert(id.clone(), value.clone());
                     return Some(ApplyInputResult {
+                        contract_path: format!("$.cases[{case_index}]"),
                         warning: None,
                         state: new_state,
                         contract: (**then).clone(),
@@ -740,6 +748,7 @@ fn apply_input(
             (Action::Notify { if_ }, SimInput::Notify) => {
                 if eval_observation(state, environment, if_) {
                     return Some(ApplyInputResult {
+                        contract_path: format!("$.cases[{case_index}]"),
                         warning: None,
                         state: state.clone(),
                         contract: (**then).clone(),

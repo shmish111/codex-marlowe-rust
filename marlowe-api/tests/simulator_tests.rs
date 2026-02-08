@@ -479,16 +479,21 @@ When:
     );
     match result {
         SimTransactionResult::Success(success) => {
-            assert!(success
-                .trace
-                .iter()
-                .any(|step| matches!(step, TraceStep::InputApplied { input_index: 0, .. })));
+            assert!(success.trace.iter().any(|step| matches!(
+                step,
+                TraceStep::InputApplied {
+                    input_index: 0,
+                    contract_path,
+                    ..
+                } if contract_path == "$.cases[0]"
+            )));
             assert!(success.trace.iter().any(|step| matches!(
                 step,
                 TraceStep::Reduced {
                     rule: TraceReduceRule::Pay,
+                    contract_path,
                     ..
-                }
+                } if contract_path == "$"
             )));
             assert!(success.trace.iter().any(|step| matches!(
                 step,
