@@ -1,0 +1,17 @@
+# cargo-mutants configuration
+# Run from crate root: cargo mutants --file mutants.toml
+
+# Keep mutation scope focused on DSL logic.
+exclude_globs = [
+  "src/main.rs",
+]
+
+# Use the full suite to maximize mutant kill coverage.
+test_cmd = ["cargo", "test"]
+
+# Conservative defaults for local development.
+minimum_test_timeout = 20
+timeout_multiplier = 2.0
+
+# Stop early if too many mutants survive in one run.
+maximum_survivors = 20

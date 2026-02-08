@@ -38,3 +38,9 @@ cargo fmt --all
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
+
+Run mutation checks (optional, requires `cargo-mutants`):
+
+```bash
+./scripts/run-mutation-checks.sh
+```
