@@ -27,8 +27,9 @@ async fn health_endpoint_returns_ok() {
         .await
         .expect("response");
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let json = json_response(response).await;
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(json["status"], "ok");
 }
 
@@ -80,8 +81,9 @@ When:
         .await
         .expect("response");
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let json = json_response(response).await;
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(json["result"], "success");
     assert_eq!(json["success"]["payments"][0]["amount"], "5");
     assert_eq!(
@@ -149,4 +151,53 @@ async fn simulate_step_rejects_ambiguous_interval() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = json_response(response).await;
     assert_eq!(json["error"]["code"], "AmbiguousTimeInterval");
+}
+
+#[tokio::test]
+async fn simulate_step_clamps_interval_to_state_min_time() {
+    let app = build_router();
+    let contract = r#"
+Pay:
+  from: { Role: "Alice" }
+  to_party: { Role: "Bob" }
+  token: { Token: { currency_symbol: "", token_name: "" } }
+  amount: { TimeIntervalStart: {} }
+  then: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "state": {
+        "min_time": "40",
+        "accounts": [
+          {
+            "owner": {"Role": "Alice"},
+            "token": {"Token": {"currency_symbol": "", "token_name": ""}},
+            "amount": "100"
+          }
+        ]
+      },
+      "transaction": {
+        "interval_start": "10",
+        "interval_end": "50",
+        "inputs": []
+      }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["success"]["payments"][0]["amount"], "40");
+    assert_eq!(json["success"]["state"]["min_time"], "40");
 }

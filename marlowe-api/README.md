@@ -29,6 +29,32 @@ Key syntax rules:
 - there are no holes
 - there are no unresolved parameters
 
+## Simulator
+
+`simulate_transaction` implements one-transaction Core Marlowe execution semantics:
+
+- applies `fixInterval` rules
+- rejects invalid intervals (`start > end`)
+- rejects intervals fully in the past (`end < min_time`)
+- clamps interval start to `max(start, min_time)`
+- reduces contract to quiescence, applies one transaction input list, then reduces again
+- reports Marlowe-style warnings (`NonPositivePay`, `PartialPay`, `AssertionFailed`, etc.)
+
+The HTTP server exposes this as:
+
+- `POST /simulate/step`
+
+Request payload fields:
+
+- `contract_yaml`: full contract YAML
+- `state`: optional state (`min_time`, `accounts`, `choices`, `bound_values`)
+- `transaction`: `interval_start`, `interval_end`, and `inputs`
+
+The endpoint returns either:
+
+- `result = "success"` with updated state, payments, warnings, and next `contract_yaml`
+- `result = "error"` with a structured simulator error code/message
+
 ## Testing
 
 Run all checks:

@@ -396,3 +396,41 @@ Pay:
         other => panic!("unexpected result: {other:?}"),
     }
 }
+
+#[test]
+fn interval_start_is_clamped_to_min_time() {
+    let contract = parse(
+        r#"
+Pay:
+  from: { Role: "Alice" }
+  to_party: { Role: "Bob" }
+  token: { Token: { currency_symbol: "", token_name: "" } }
+  amount: { TimeIntervalStart: {} }
+  then: { Close: {} }
+"#,
+    );
+
+    let mut state = SimState {
+        min_time: b(100),
+        ..SimState::default()
+    };
+    state.accounts.insert(
+        AccountId {
+            owner: marlowe_api::ast::Party::Role("Alice".to_owned()),
+            token: marlowe_api::ast::Token::Token {
+                currency_symbol: "".to_owned(),
+                token_name: "".to_owned(),
+            },
+        },
+        b(1000),
+    );
+
+    let result = simulate_transaction(&contract, &state, &tx(50, 120, vec![]));
+    match result {
+        SimTransactionResult::Success(success) => {
+            assert_eq!(success.payments[0].amount, b(100));
+            assert_eq!(success.state.min_time, b(100));
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
+}
