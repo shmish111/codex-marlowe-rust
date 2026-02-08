@@ -1,0 +1,96 @@
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Seller" }
+            by: { Role: "Buyer" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 75000000 }
+        then:
+          When:
+            cases:
+              - Case:
+                  action:
+                    Choice:
+                      id:
+                        ChoiceId:
+                          name: "Everything is alright"
+                          party: { Role: "Buyer" }
+                      bounds:
+                        - Bound: { from: { Constant: 0 }, to: { Constant: 0 } }
+                  then: { Close: {} }
+              - Case:
+                  action:
+                    Choice:
+                      id:
+                        ChoiceId:
+                          name: "Report problem"
+                          party: { Role: "Buyer" }
+                      bounds:
+                        - Bound: { from: { Constant: 1 }, to: { Constant: 1 } }
+                  then:
+                    Pay:
+                      from: { Role: "Seller" }
+                      to_account: { Role: "Buyer" }
+                      token: { Token: { currency_symbol: "", token_name: "" } }
+                      amount: { Constant: 75000000 }
+                      then:
+                        When:
+                          cases:
+                            - Case:
+                                action:
+                                  Choice:
+                                    id:
+                                      ChoiceId:
+                                        name: "Confirm problem"
+                                        party: { Role: "Seller" }
+                                    bounds:
+                                      - Bound: { from: { Constant: 1 }, to: { Constant: 1 } }
+                                then: { Close: {} }
+                            - Case:
+                                action:
+                                  Choice:
+                                    id:
+                                      ChoiceId:
+                                        name: "Dispute problem"
+                                        party: { Role: "Seller" }
+                                    bounds:
+                                      - Bound: { from: { Constant: 0 }, to: { Constant: 0 } }
+                                then:
+                                  When:
+                                    cases:
+                                      - Case:
+                                          action:
+                                            Choice:
+                                              id:
+                                                ChoiceId:
+                                                  name: "Dismiss claim"
+                                                  party: { Role: "Mediator" }
+                                              bounds:
+                                                - Bound: { from: { Constant: 0 }, to: { Constant: 0 } }
+                                          then:
+                                            Pay:
+                                              from: { Role: "Buyer" }
+                                              to_account: { Role: "Seller" }
+                                              token: { Token: { currency_symbol: "", token_name: "" } }
+                                              amount: { Constant: 75000000 }
+                                              then: { Close: {} }
+                                      - Case:
+                                          action:
+                                            Choice:
+                                              id:
+                                                ChoiceId:
+                                                  name: "Confirm claim"
+                                                  party: { Role: "Mediator" }
+                                              bounds:
+                                                - Bound: { from: { Constant: 1 }, to: { Constant: 1 } }
+                                          then: { Close: {} }
+                                    timeout: { Timeout: 1679676769000 }
+                                    timeout_continuation: { Close: {} }
+                          timeout: { Timeout: 1679673169000 }
+                          timeout_continuation: { Close: {} }
+            timeout: { Timeout: 1679669569000 }
+            timeout_continuation: { Close: {} }
+  timeout: { Timeout: 1679665969000 }
+  timeout_continuation: { Close: {} }

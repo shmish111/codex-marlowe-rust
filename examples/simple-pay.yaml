@@ -1,0 +1,6 @@
+Pay:
+  from: { Role: "alice" }
+  to_party: { Role: "bob" }
+  token: { Token: { currency_symbol: "", token_name: "" } }
+  amount: { Constant: 10 }
+  then: { Close: {} }

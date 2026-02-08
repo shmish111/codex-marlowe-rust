@@ -1,0 +1,22 @@
+When:
+  cases:
+    - Case:
+        action:
+          Choice:
+            id:
+              ChoiceId:
+                name: "choiceExample"
+                party: { Role: "Alice" }
+            bounds:
+              - Bound: { from: { Constant: 1 }, to: { Constant: 2 } }
+        then:
+          Let:
+            name: "x"
+            value:
+              ValueFromChoice:
+                ChoiceId:
+                  name: "choiceExample"
+                  party: { Role: "Alice" }
+            then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }

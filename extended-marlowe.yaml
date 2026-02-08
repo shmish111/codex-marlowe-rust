@@ -1,0 +1,137 @@
+# Extended Marlowe YAML Schema (proposal)
+#
+# Conventions:
+# - Each constructor is a single-key mapping (tagged union).
+# - No explicit "type" fields.
+# - Universal holes: any scalar of form "?name" is a hole of the expected type.
+# - Strict params: any scalar of form "$name" is only valid in Value and Timeout positions.
+# - Literals that start with "?" or "$" can be escaped by doubling: "??name" -> "?name", "$$name" -> "$name".
+#
+# Numeric type:
+# - All numeric values are unbounded integers.
+#
+# Time model:
+# - Timeout constants are POSIX milliseconds (integer).
+
+Contract:
+  one_of:
+    - Close: {}
+    - Pay:
+        from: Party
+        to_party: Party
+        to_account: Party
+        token: Token
+        amount: Value
+        then: Contract
+    - If:
+        cond: Observation
+        then: Contract
+        else: Contract
+    - When:
+        cases: [Case...]
+        timeout: Timeout
+        timeout_continuation: Contract
+    - Let:
+        name: String
+        value: Value
+        then: Contract
+    - Assert:
+        cond: Observation
+        then: Contract
+  note:
+    - Exactly one of "to_party" or "to_account" must be present in Pay.
+    - Any of the above can be replaced by a hole "?name" if the expected type is inferrable.
+
+Case:
+  Case:
+    action: Action
+    then: Contract
+
+Action:
+  one_of:
+    - Deposit:
+        into: Party
+        by: Party
+        token: Token
+        amount: Value
+    - Choice:
+        id: ChoiceId
+        bounds: [Bound...]
+    - Notify:
+        if: Observation
+
+ChoiceId:
+  ChoiceId:
+    name: String
+    party: Party
+
+Bound:
+  Bound:
+    from: Value
+    to: Value
+
+Value:
+  one_of:
+    - Constant: Integer
+    - Add: [Value, Value]
+    - Sub: [Value, Value]
+    - Mul: [Value, Value]
+    - Div: [Value, Value]
+    - Neg: Value
+    - Abs: Value
+    - ValueFromChoice: ChoiceId
+    - UseValue: String
+    - TimeIntervalStart: {}
+    - TimeIntervalEnd: {}
+    - AvailableMoney:
+        account: Party
+        token: Token
+    - ConstantParam: String
+  note:
+    - "$param" is allowed here and is sugar for ConstantParam.
+
+Observation:
+  one_of:
+    - True: {}
+    - False: {}
+    - And: [Observation, Observation]
+    - Or: [Observation, Observation]
+    - Not: Observation
+    - ChoseSomething: ChoiceId
+    - ValueGE: [Value, Value]
+    - ValueGT: [Value, Value]
+    - ValueLT: [Value, Value]
+    - ValueLE: [Value, Value]
+    - ValueEQ: [Value, Value]
+
+Timeout:
+  one_of:
+    - Timeout: Integer
+    - SlotParam: String
+  note:
+    - "$param" is allowed here and is sugar for SlotParam.
+
+Party:
+  one_of:
+    - Role: String
+    - Address: String
+
+Token:
+  Token:
+    currency_symbol: String
+    token_name: String
+
+Payee:
+  one_of:
+    - Party: Party
+    - Account: Party
+
+Holes:
+  rule:
+    - Any scalar string matching /^\?[A-Za-z_][A-Za-z0-9_]*$/ is a hole.
+    - Holes can appear in any position; the type is inferred from context.
+
+Params:
+  rule:
+    - Any scalar string matching /^\$[A-Za-z_][A-Za-z0-9_]*$/ is a parameter.
+    - Strict: parameters are only valid in Value and Timeout positions.

@@ -1,0 +1,18 @@
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Bob" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: $deposit_amt
+        then:
+          Pay:
+            from: { Role: "Alice" }
+            to_party: { Role: "Bob" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 100 }
+            then: { Close: {} }
+  timeout: $deadline
+  timeout_continuation: { Close: {} }

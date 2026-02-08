@@ -1,0 +1,12 @@
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Bob" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: ?deposit_amount
+        then: ?continuation
+  timeout: ?deadline
+  timeout_continuation: { Close: {} }

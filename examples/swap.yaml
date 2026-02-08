@@ -1,0 +1,36 @@
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Ada Provider" }
+            by: { Role: "Ada Provider" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 10 }
+        then:
+          When:
+            cases:
+              - Case:
+                  action:
+                    Deposit:
+                      into: { Role: "Dollar Provider" }
+                      by: { Role: "Dollar Provider" }
+                      token: { Token: { currency_symbol: "85bb65", token_name: "dollar" } }
+                      amount: { Constant: 20 }
+                  then:
+                    Pay:
+                      from: { Role: "Ada Provider" }
+                      to_party: { Role: "Dollar Provider" }
+                      token: { Token: { currency_symbol: "", token_name: "" } }
+                      amount: { Constant: 10 }
+                      then:
+                        Pay:
+                          from: { Role: "Dollar Provider" }
+                          to_party: { Role: "Ada Provider" }
+                          token: { Token: { currency_symbol: "85bb65", token_name: "dollar" } }
+                          amount: { Constant: 20 }
+                          then: { Close: {} }
+            timeout: { Timeout: 1664816400000 }
+            timeout_continuation: { Close: {} }
+  timeout: { Timeout: 1664812800000 }
+  timeout_continuation: { Close: {} }

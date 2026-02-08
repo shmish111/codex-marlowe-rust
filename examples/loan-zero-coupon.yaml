@@ -1,0 +1,42 @@
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Lender" }
+            by: { Role: "Lender" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 80000000 }
+        then:
+          Pay:
+            from: { Role: "Lender" }
+            to_party: { Role: "Borrower" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 80000000 }
+            then:
+              When:
+                cases:
+                  - Case:
+                      action:
+                        Deposit:
+                          into: { Role: "Borrower" }
+                          by: { Role: "Borrower" }
+                          token: { Token: { currency_symbol: "", token_name: "" } }
+                          amount:
+                            Add:
+                              - { Constant: 80000000 }
+                              - { Constant: 5000000 }
+                      then:
+                        Pay:
+                          from: { Role: "Borrower" }
+                          to_party: { Role: "Lender" }
+                          token: { Token: { currency_symbol: "", token_name: "" } }
+                          amount:
+                            Add:
+                              - { Constant: 80000000 }
+                              - { Constant: 5000000 }
+                          then: { Close: {} }
+                timeout: { Timeout: 1679615489000 }
+                timeout_continuation: { Close: {} }
+  timeout: { Timeout: 1679608289000 }
+  timeout_continuation: { Close: {} }
