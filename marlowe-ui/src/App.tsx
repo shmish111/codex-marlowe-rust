@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import './styles.css';
 
+const OPEN_API_URL = 'http://127.0.0.1:3000/openapi.json';
+
 type Example = {
   id: string;
   name: string;
@@ -18,6 +20,8 @@ export default function App() {
   const [code, setCode] = useState<string>('');
   const [isLoadingExamples, setLoadingExamples] = useState(true);
   const [examplesError, setExamplesError] = useState<string | null>(null);
+  const [apiStatus, setApiStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
+  const [apiMessage, setApiMessage] = useState('Not connected');
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
 
@@ -68,6 +72,30 @@ export default function App() {
     [examples]
   );
 
+  const handleConnectApi = async () => {
+    setApiStatus('connecting');
+    setApiMessage('Connecting...');
+
+    try {
+      const response = await fetch(OPEN_API_URL);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const spec = (await response.json()) as Record<string, unknown>;
+      if (typeof spec.openapi !== 'string') {
+        throw new Error('Missing openapi field');
+      }
+
+      setApiStatus('connected');
+      setApiMessage(`Connected (${spec.openapi})`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setApiStatus('error');
+      setApiMessage(`Connection failed: ${message}`);
+    }
+  };
+
   return (
     <div className="app">
       <header className="app__header">
@@ -82,9 +110,15 @@ export default function App() {
           <button className="primary" type="button" onClick={() => setModalOpen(true)}>
             Load example
           </button>
-          <button className="ghost" type="button">
+          <button
+            className="ghost"
+            type="button"
+            onClick={handleConnectApi}
+            disabled={apiStatus === 'connecting'}
+          >
             Connect API
           </button>
+          <span className={`api-status api-status--${apiStatus}`}>{apiMessage}</span>
         </div>
       </header>
 

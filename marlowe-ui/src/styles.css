@@ -105,6 +105,29 @@ h2 {
   color: var(--ink);
 }
 
+.ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.api-status {
+  align-self: center;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.api-status--connected {
+  color: #156f3f;
+}
+
+.api-status--error {
+  color: #a72d2d;
+}
+
+.api-status--connecting {
+  color: #8f5b00;
+}
+
 .app__content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -311,6 +334,10 @@ h2 {
   .header-actions {
     width: 100%;
     flex-direction: column;
+  }
+
+  .api-status {
+    align-self: flex-start;
   }
 
   .primary,
