@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import { simulateContract, simulateStep, validateContract } from './api/client';
-import type { SimulationInput, SimulationResponse, ValidationDiagnostic } from './api/client';
+import type {
+  SimulationInput,
+  SimulationResponse,
+  ValidationDiagnostic,
+  ValidationExplainItem,
+  ValidationSummary
+} from './api/client';
 import type * as Monaco from 'monaco-editor';
 import './styles.css';
 
@@ -19,7 +25,15 @@ type Example = {
 type ValidationState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'success'; valid: boolean; diagnostics: ValidationDiagnostic[] }
+  | {
+      status: 'success';
+      valid: boolean;
+      diagnostics: ValidationDiagnostic[];
+      readyToRun?: boolean;
+      summary?: ValidationSummary;
+      blocking?: ValidationExplainItem[];
+      warnings?: ValidationExplainItem[];
+    }
   | { status: 'error'; message: string };
 
 type SimulationState =
@@ -239,7 +253,11 @@ export default function App() {
         setValidationState({
           status: 'success',
           valid: result.valid,
-          diagnostics: result.diagnostics
+          diagnostics: result.diagnostics,
+          readyToRun: result.readyToRun,
+          summary: result.summary,
+          blocking: result.blocking,
+          warnings: result.warnings
         });
       } catch (error) {
         if (runId !== validationRunIdRef.current) {
@@ -313,6 +331,17 @@ export default function App() {
       return null;
     }
 
+    if (validationState.readyToRun === true && validationState.diagnostics.length === 0) {
+      return { kind: 'valid' as const, label: 'Valid contract' };
+    }
+
+    if (validationState.readyToRun === false) {
+      if ((validationState.summary?.errorCount ?? 0) === 0) {
+        return { kind: 'incomplete' as const, label: 'Incomplete contract' };
+      }
+      return { kind: 'invalid' as const, label: 'Invalid contract' };
+    }
+
     if (validationState.valid) {
       return { kind: 'valid' as const, label: 'Valid contract' };
     }
@@ -328,10 +357,16 @@ export default function App() {
     return { kind: 'invalid' as const, label: 'Invalid contract' };
   }, [validationState]);
 
+  const explainBlockingItems =
+    validationState.status === 'success' ? (validationState.blocking ?? []) : [];
+  const explainWarningItems =
+    validationState.status === 'success' ? (validationState.warnings ?? []) : [];
+
   const canRunSimulation =
     validationState.status === 'success' &&
-    validationState.valid &&
-    validationState.diagnostics.length === 0;
+    (typeof validationState.readyToRun === 'boolean'
+      ? validationState.readyToRun
+      : validationState.valid && validationState.diagnostics.length === 0);
 
   const handleApplyInput = async () => {
     if (simulationState.status !== 'success' || !selectedSimulationInput) {
@@ -622,6 +657,18 @@ export default function App() {
                 >
                   {validationSummary?.label}
                 </div>
+                {validationState.summary ? (
+                  <div className="panel-block">
+                    <p className="panel-result">Typecheck summary</p>
+                    <div className="summary-grid">
+                      <span>Errors: {validationState.summary.errorCount}</span>
+                      <span>Blocking: {validationState.summary.blockingCount}</span>
+                      <span>Warnings: {validationState.summary.warningCount}</span>
+                      <span>Holes: {validationState.summary.holeCount}</span>
+                      <span>Params: {validationState.summary.paramCount}</span>
+                    </div>
+                  </div>
+                ) : null}
                 {unresolvedItems.length > 0 ? (
                   <div className="panel-block">
                     <p className="panel-result">Unresolved placeholders</p>
@@ -630,6 +677,32 @@ export default function App() {
                         <li key={item.name}>
                           <code>{item.name}</code>
                           {` type: ${item.expectedType ?? 'Unknown'}`}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {explainBlockingItems.length > 0 ? (
+                  <div className="panel-block">
+                    <p className="panel-result">Blocking checks</p>
+                    <ul className="panel-list">
+                      {explainBlockingItems.map((item, index) => (
+                        <li key={`${item.code}-${item.path}-${index}`}>
+                          <strong>{item.message}</strong>
+                          <span className="panel-hint">{item.hint}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {explainWarningItems.length > 0 ? (
+                  <div className="panel-block">
+                    <p className="panel-result">Warnings</p>
+                    <ul className="panel-list">
+                      {explainWarningItems.map((item, index) => (
+                        <li key={`${item.code}-${item.path}-${index}`}>
+                          <strong>{item.message}</strong>
+                          <span className="panel-hint">{item.hint}</span>
                         </li>
                       ))}
                     </ul>

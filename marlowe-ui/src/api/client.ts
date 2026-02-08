@@ -13,6 +13,26 @@ export type ValidationDiagnostic = {
 export type ValidationResponse = {
   valid: boolean;
   diagnostics: ValidationDiagnostic[];
+  readyToRun?: boolean;
+  summary?: ValidationSummary;
+  blocking?: ValidationExplainItem[];
+  warnings?: ValidationExplainItem[];
+};
+
+export type ValidationSummary = {
+  blockingCount: number;
+  warningCount: number;
+  errorCount: number;
+  holeCount: number;
+  paramCount: number;
+};
+
+export type ValidationExplainItem = {
+  code: string;
+  path: string;
+  message: string;
+  hint: string;
+  details?: Record<string, unknown>;
 };
 
 export type ChoiceBound = {
@@ -126,6 +146,39 @@ type ApiSimulateStepResponse = {
   } | null;
 };
 
+type ApiTypecheckExplainItem = {
+  code: string;
+  path: string;
+  message: string;
+  hint: string;
+  details?: Record<string, unknown>;
+};
+
+type ApiTypecheckExplainSummary = {
+  blocking_count: number;
+  warning_count: number;
+  error_count: number;
+  hole_count: number;
+  param_count: number;
+};
+
+type ApiTypecheckExplainSuccess = {
+  ready_to_run: boolean;
+  summary: ApiTypecheckExplainSummary;
+  blocking: ApiTypecheckExplainItem[];
+  warnings: ApiTypecheckExplainItem[];
+};
+
+type ApiTypecheckExplainResponse = {
+  result: string;
+  error?: {
+    code?: string;
+    subcode?: string;
+    message: string;
+  } | null;
+  success?: ApiTypecheckExplainSuccess | null;
+};
+
 const JSON_HEADERS = {
   'Content-Type': 'application/json'
 };
@@ -214,6 +267,26 @@ function mapPreviewErrorToDiagnostics(
   ];
 }
 
+function mapExplainItem(item: ApiTypecheckExplainItem): ValidationExplainItem {
+  return {
+    code: item.code,
+    path: item.path,
+    message: item.message,
+    hint: item.hint,
+    details: item.details
+  };
+}
+
+function mapExplainSummary(summary: ApiTypecheckExplainSummary): ValidationSummary {
+  return {
+    blockingCount: summary.blocking_count,
+    warningCount: summary.warning_count,
+    errorCount: summary.error_count,
+    holeCount: summary.hole_count,
+    paramCount: summary.param_count
+  };
+}
+
 function mapPreviewInputs(inputs: ApiPreviewInput[]): SimulationInput[] {
   const mapped: SimulationInput[] = [];
 
@@ -259,26 +332,44 @@ function getMinTime(state: Record<string, unknown> | null | undefined): string {
 }
 
 export async function validateContract(code: string): Promise<ValidationResponse> {
-  const response = await requestJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
-    contract_yaml: code,
-    interval_start: '0',
-    interval_end: '0'
-  });
+  const [previewResponse, explainResponse] = await Promise.all([
+    requestJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
+      contract_yaml: code,
+      interval_start: '0',
+      interval_end: '0'
+    }),
+    requestJson<ApiTypecheckExplainResponse>('/api/typecheck/explain', {
+      contract_yaml: code
+    })
+  ]);
 
-  if (response.data?.error) {
+  const explainSuccess = explainResponse.data?.success ?? null;
+  const explainData =
+    explainSuccess === null
+      ? {}
+      : {
+          readyToRun: explainSuccess.ready_to_run,
+          summary: mapExplainSummary(explainSuccess.summary),
+          blocking: explainSuccess.blocking.map(mapExplainItem),
+          warnings: explainSuccess.warnings.map(mapExplainItem)
+        };
+
+  if (previewResponse.data?.error) {
     return {
       valid: false,
-      diagnostics: mapPreviewErrorToDiagnostics(response.data.error)
+      diagnostics: mapPreviewErrorToDiagnostics(previewResponse.data.error),
+      ...explainData
     };
   }
 
-  if (!response.ok) {
-    throw statusError(response.status);
+  if (!previewResponse.ok) {
+    throw statusError(previewResponse.status);
   }
 
   return {
     valid: true,
-    diagnostics: []
+    diagnostics: [],
+    ...explainData
   };
 }
 

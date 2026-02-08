@@ -31,6 +31,43 @@ function mockExamplesFetch(fetchMock: ReturnType<typeof vi.fn>) {
   });
 }
 
+function mockPreviewOk(fetchMock: ReturnType<typeof vi.fn>, contractYaml = 'test') {
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      result: 'ok',
+      success: {
+        contract_yaml: contractYaml,
+        state: { min_time: '0' },
+        inputs: []
+      },
+      error: null
+    })
+  });
+}
+
+function mockTypecheckReady(fetchMock: ReturnType<typeof vi.fn>) {
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      result: 'ok',
+      success: {
+        ready_to_run: true,
+        summary: {
+          blocking_count: 0,
+          warning_count: 0,
+          error_count: 0,
+          hole_count: 0,
+          param_count: 0
+        },
+        blocking: [],
+        warnings: []
+      },
+      error: null
+    })
+  });
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -44,18 +81,8 @@ describe('App', () => {
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
     });
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: 'ok',
-        success: {
-          contract_yaml: 'test',
-          state: { min_time: '0' },
-          inputs: []
-        },
-        error: null
-      })
-    });
+    mockPreviewOk(fetchMock);
+    mockTypecheckReady(fetchMock);
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -93,18 +120,8 @@ describe('App', () => {
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
     });
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: 'ok',
-        success: {
-          contract_yaml: 'test',
-          state: { min_time: '0' },
-          inputs: []
-        },
-        error: null
-      })
-    });
+    mockPreviewOk(fetchMock);
+    mockTypecheckReady(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 400,
@@ -117,6 +134,32 @@ describe('App', () => {
         }
       })
     });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          ready_to_run: false,
+          summary: {
+            blocking_count: 1,
+            warning_count: 0,
+            error_count: 1,
+            hole_count: 0,
+            param_count: 0
+          },
+          blocking: [
+            {
+              code: 'TypeError',
+              path: '$.When',
+              message: 'Expected Close but found malformed when',
+              hint: 'Fix malformed node.'
+            }
+          ],
+          warnings: []
+        },
+        error: null
+      })
+    });
     vi.stubGlobal('fetch', fetchMock);
 
     render(<App />);
@@ -126,7 +169,7 @@ describe('App', () => {
     await new Promise((resolve) => setTimeout(resolve, 700));
 
     expect(await screen.findByText('Invalid contract')).toBeInTheDocument();
-    expect(await screen.findByText('Expected Close but found malformed when')).toBeInTheDocument();
+    expect((await screen.findAllByText('Expected Close but found malformed when')).length).toBe(2);
   });
 
   it('progresses to the next choice after applying the first input', async () => {
@@ -136,18 +179,8 @@ describe('App', () => {
       ok: true,
       json: async () => ({ openapi: '3.1.0' })
     });
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        result: 'ok',
-        success: {
-          contract_yaml: 'test',
-          state: { min_time: '0' },
-          inputs: []
-        },
-        error: null
-      })
-    });
+    mockPreviewOk(fetchMock);
+    mockTypecheckReady(fetchMock);
     fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({

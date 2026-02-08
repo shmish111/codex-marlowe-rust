@@ -7,21 +7,43 @@ afterEach(() => {
 
 describe('api client', () => {
   it('posts validation payload', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        result: 'ok',
-        success: { contract_yaml: 'x', state: { min_time: '0' }, inputs: [] },
-        error: null
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: 'ok',
+          success: { contract_yaml: 'x', state: { min_time: '0' }, inputs: [] },
+          error: null
+        })
       })
-    });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: 'ok',
+          success: {
+            ready_to_run: true,
+            summary: {
+              blocking_count: 0,
+              warning_count: 0,
+              error_count: 0,
+              hole_count: 0,
+              param_count: 0
+            },
+            blocking: [],
+            warnings: []
+          },
+          error: null
+        })
+      });
 
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await validateContract('contract-code');
 
     expect(result.valid).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith('/api/simulate/preview', {
+    expect(result.readyToRun).toBe(true);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/simulate/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -30,29 +52,64 @@ describe('api client', () => {
         interval_end: '0'
       })
     });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/typecheck/explain', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'contract-code'
+      })
+    });
   });
 
   it('returns detailed diagnostics for 400 validation responses', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({
-        result: 'error',
-        error: {
-          subcode: 'INVALID_CONTRACT',
-          message: 'Invalid contract',
-          diagnostics: [
-            {
-              message: 'Bad token at line 4',
-              line: 4,
-              column: 12,
-              end_line: 4,
-              end_column: 20
-            }
-          ]
-        }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          result: 'error',
+          error: {
+            subcode: 'INVALID_CONTRACT',
+            message: 'Invalid contract',
+            diagnostics: [
+              {
+                message: 'Bad token at line 4',
+                line: 4,
+                column: 12,
+                end_line: 4,
+                end_column: 20
+              }
+            ]
+          }
+        })
       })
-    });
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          result: 'ok',
+          success: {
+            ready_to_run: false,
+            summary: {
+              blocking_count: 1,
+              warning_count: 0,
+              error_count: 1,
+              hole_count: 0,
+              param_count: 0
+            },
+            blocking: [
+              {
+                code: 'TypeError',
+                path: '$.When',
+                message: 'Bad token at line 4',
+                hint: 'Check this node.'
+              }
+            ],
+            warnings: []
+          },
+          error: null
+        })
+      });
 
     vi.stubGlobal('fetch', fetchMock);
 
@@ -70,6 +127,8 @@ describe('api client', () => {
         message: 'Bad token at line 4'
       }
     ]);
+    expect(result.summary?.errorCount).toBe(1);
+    expect(result.blocking?.[0]?.hint).toBe('Check this node.');
   });
 
   it('extracts choice/deposit/notify inputs from preview', async () => {
