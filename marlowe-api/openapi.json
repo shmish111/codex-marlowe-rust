@@ -1,0 +1,878 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "marlowe-api",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "health_handler",
+        "responses": {
+          "200": {
+            "description": "Service health",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/simulate/preview": {
+      "post": {
+        "tags": [
+          "simulation"
+        ],
+        "operationId": "simulate_preview_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulatePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Preview generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulatePreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Preview rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulatePreviewResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulatePreviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/simulate/step": {
+      "post": {
+        "tags": [
+          "simulation"
+        ],
+        "operationId": "simulate_step_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulateStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Simulation step succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulateStepResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Simulation step rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulateStepResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulateStepResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountBalanceRequest": {
+        "type": "object",
+        "required": [
+          "owner",
+          "token",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string",
+            "example": "100"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Party"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "AccountBalanceResponse": {
+        "type": "object",
+        "required": [
+          "owner",
+          "token",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Party"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "BigIntValue": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "format": "int64"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "null",
+            "default": null
+          }
+        ]
+      },
+      "ChoiceId": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Hole"
+            ],
+            "properties": {
+              "Hole": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "ChoiceId"
+            ],
+            "properties": {
+              "ChoiceId": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "party"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "party": {
+                    "$ref": "#/components/schemas/Party"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ChoiceValueRequest": {
+        "type": "object",
+        "required": [
+          "id",
+          "value"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ChoiceId"
+          },
+          "value": {
+            "type": "string",
+            "example": "1"
+          }
+        }
+      },
+      "ChoiceValueResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "value"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ChoiceId"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorDiagnosticResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "path",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "Party": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Hole"
+            ],
+            "properties": {
+              "Hole": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Role"
+            ],
+            "properties": {
+              "Role": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Address"
+            ],
+            "properties": {
+              "Address": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "PayeeTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Hole"
+            ],
+            "properties": {
+              "Hole": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "ToParty"
+            ],
+            "properties": {
+              "ToParty": {
+                "$ref": "#/components/schemas/Party"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "ToAccount"
+            ],
+            "properties": {
+              "ToAccount": {
+                "$ref": "#/components/schemas/Party"
+              }
+            }
+          }
+        ]
+      },
+      "PaymentResponse": {
+        "type": "object",
+        "required": [
+          "from",
+          "to",
+          "token",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/Party"
+          },
+          "to": {
+            "$ref": "#/components/schemas/PayeeTarget"
+          },
+          "token": {
+            "$ref": "#/components/schemas/Token"
+          }
+        }
+      },
+      "PreviewBoundResponse": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      },
+      "PreviewInputResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "deposit"
+            ],
+            "properties": {
+              "deposit": {
+                "type": "object",
+                "required": [
+                  "into",
+                  "by",
+                  "token",
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "string"
+                  },
+                  "by": {
+                    "$ref": "#/components/schemas/Party"
+                  },
+                  "into": {
+                    "$ref": "#/components/schemas/Party"
+                  },
+                  "token": {
+                    "$ref": "#/components/schemas/Token"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "choice"
+            ],
+            "properties": {
+              "choice": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "bounds"
+                ],
+                "properties": {
+                  "bounds": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/PreviewBoundResponse"
+                    }
+                  },
+                  "id": {
+                    "$ref": "#/components/schemas/ChoiceId"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "notify"
+            ],
+            "properties": {
+              "notify": {
+                "type": "object",
+                "required": [
+                  "can_notify"
+                ],
+                "properties": {
+                  "can_notify": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "PreviewSuccessResponse": {
+        "type": "object",
+        "required": [
+          "state",
+          "contract_yaml",
+          "inputs"
+        ],
+        "properties": {
+          "contract_yaml": {
+            "type": "string"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewInputResponse"
+            }
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateResponse"
+          }
+        }
+      },
+      "SimInputRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "deposit"
+            ],
+            "properties": {
+              "deposit": {
+                "type": "object",
+                "required": [
+                  "into",
+                  "by",
+                  "token",
+                  "amount"
+                ],
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "example": "5"
+                  },
+                  "by": {
+                    "$ref": "#/components/schemas/Party"
+                  },
+                  "into": {
+                    "$ref": "#/components/schemas/Party"
+                  },
+                  "token": {
+                    "$ref": "#/components/schemas/Token"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "choice"
+            ],
+            "properties": {
+              "choice": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "value"
+                ],
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/ChoiceId"
+                  },
+                  "value": {
+                    "type": "string",
+                    "example": "1"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "string",
+            "enum": [
+              "notify"
+            ]
+          }
+        ]
+      },
+      "SimulateErrorResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "diagnostics": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ErrorDiagnosticResponse"
+            }
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SimulatePreviewRequest": {
+        "type": "object",
+        "required": [
+          "contract_yaml",
+          "interval_start",
+          "interval_end"
+        ],
+        "properties": {
+          "contract_yaml": {
+            "type": "string"
+          },
+          "interval_end": {
+            "type": "string",
+            "example": "100"
+          },
+          "interval_start": {
+            "type": "string",
+            "example": "0"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SimulateStateRequest"
+          }
+        }
+      },
+      "SimulatePreviewResponse": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SimulateErrorResponse"
+              }
+            ]
+          },
+          "result": {
+            "type": "string"
+          },
+          "success": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PreviewSuccessResponse"
+              }
+            ]
+          }
+        }
+      },
+      "SimulateStateRequest": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountBalanceRequest"
+            }
+          },
+          "bound_values": {
+            "type": "object"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChoiceValueRequest"
+            }
+          },
+          "min_time": {
+            "type": "string",
+            "example": "0"
+          }
+        }
+      },
+      "SimulateStepRequest": {
+        "type": "object",
+        "required": [
+          "contract_yaml",
+          "transaction"
+        ],
+        "properties": {
+          "contract_yaml": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SimulateStateRequest"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/SimulateTxRequest"
+          }
+        }
+      },
+      "SimulateStepResponse": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SimulateErrorResponse"
+              }
+            ]
+          },
+          "result": {
+            "type": "string"
+          },
+          "success": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SimulateSuccessResponse"
+              }
+            ]
+          }
+        }
+      },
+      "SimulateSuccessResponse": {
+        "type": "object",
+        "required": [
+          "warnings",
+          "payments",
+          "state",
+          "contract_yaml"
+        ],
+        "properties": {
+          "contract_yaml": {
+            "type": "string"
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentResponse"
+            }
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateResponse"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WarningResponse"
+            }
+          }
+        }
+      },
+      "SimulateTxRequest": {
+        "type": "object",
+        "required": [
+          "interval_start",
+          "interval_end"
+        ],
+        "properties": {
+          "inputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimInputRequest"
+            }
+          },
+          "interval_end": {
+            "type": "string",
+            "example": "100"
+          },
+          "interval_start": {
+            "type": "string",
+            "example": "0"
+          }
+        }
+      },
+      "StateResponse": {
+        "type": "object",
+        "required": [
+          "min_time",
+          "accounts",
+          "choices",
+          "bound_values"
+        ],
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountBalanceResponse"
+            }
+          },
+          "bound_values": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ChoiceValueResponse"
+            }
+          },
+          "min_time": {
+            "type": "string"
+          }
+        }
+      },
+      "Token": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "Hole"
+            ],
+            "properties": {
+              "Hole": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "Token"
+            ],
+            "properties": {
+              "Token": {
+                "type": "object",
+                "required": [
+                  "currency_symbol",
+                  "token_name"
+                ],
+                "properties": {
+                  "currency_symbol": {
+                    "type": "string"
+                  },
+                  "token_name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "WarningResponse": {
+        "type": "object",
+        "required": [
+          "kind",
+          "details"
+        ],
+        "properties": {
+          "details": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Service health"
+    },
+    {
+      "name": "simulation",
+      "description": "Marlowe simulation APIs"
+    }
+  ]
+}

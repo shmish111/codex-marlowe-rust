@@ -1,5 +1,6 @@
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DslType {
@@ -131,14 +132,14 @@ pub enum Timeout {
     PosixTime(BigInt),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Party {
     Hole(String),
     Role(String),
     Address(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum Token {
     Hole(String),
     Token {
@@ -147,7 +148,7 @@ pub enum Token {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
 pub enum ChoiceId {
     Hole(String),
     ChoiceId { name: String, party: Party },
@@ -159,7 +160,7 @@ pub enum Bound {
     Bound { from: Value, to: Value },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum PayeeTarget {
     Hole(String),
     ToParty(Party),

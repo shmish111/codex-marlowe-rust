@@ -76,6 +76,12 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
+Generate OpenAPI from Rust source:
+
+```bash
+cargo run --bin generate_openapi
+```
+
 Run mutation checks (optional, requires `cargo-mutants`):
 
 ```bash

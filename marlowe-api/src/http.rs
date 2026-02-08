@@ -8,6 +8,7 @@ use axum::{
 };
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
+use utoipa::{OpenApi, ToSchema};
 
 use crate::{
     ast::{ChoiceId, Party, PayeeTarget, Token},
@@ -30,16 +31,22 @@ pub fn build_router() -> Router {
         .with_state(AppState)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct HealthResponse {
     status: &'static str,
 }
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "health",
+    responses((status = 200, description = "Service health", body = HealthResponse))
+)]
 async fn health_handler() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct SimulateStepRequest {
     pub contract_yaml: String,
     #[serde(default)]
@@ -47,65 +54,75 @@ pub struct SimulateStepRequest {
     pub transaction: SimulateTxRequest,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, ToSchema)]
 pub struct SimulateStateRequest {
     #[serde(default = "zero")]
+    #[schema(value_type = String, example = "0")]
     pub min_time: BigIntValue,
     #[serde(default)]
     pub accounts: Vec<AccountBalanceRequest>,
     #[serde(default)]
     pub choices: Vec<ChoiceValueRequest>,
     #[serde(default)]
+    #[schema(value_type = Object)]
     pub bound_values: BTreeMap<String, BigIntValue>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct AccountBalanceRequest {
     pub owner: Party,
     pub token: Token,
+    #[schema(value_type = String, example = "100")]
     pub amount: BigIntValue,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ChoiceValueRequest {
     pub id: ChoiceId,
+    #[schema(value_type = String, example = "1")]
     pub value: BigIntValue,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct SimulateTxRequest {
+    #[schema(value_type = String, example = "0")]
     pub interval_start: BigIntValue,
+    #[schema(value_type = String, example = "100")]
     pub interval_end: BigIntValue,
     #[serde(default)]
     pub inputs: Vec<SimInputRequest>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct SimulatePreviewRequest {
     pub contract_yaml: String,
     #[serde(default)]
     pub state: SimulateStateRequest,
+    #[schema(value_type = String, example = "0")]
     pub interval_start: BigIntValue,
+    #[schema(value_type = String, example = "100")]
     pub interval_end: BigIntValue,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SimInputRequest {
     Deposit {
         into: Party,
         by: Party,
         token: Token,
+        #[schema(value_type = String, example = "5")]
         amount: BigIntValue,
     },
     Choice {
         id: ChoiceId,
+        #[schema(value_type = String, example = "1")]
         value: BigIntValue,
     },
     Notify,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub enum BigIntValue {
     Integer(i64),
@@ -130,7 +147,7 @@ fn zero() -> BigIntValue {
     BigIntValue::Integer(0)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SimulateStepResponse {
     pub result: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -139,7 +156,7 @@ pub struct SimulateStepResponse {
     pub error: Option<SimulateErrorResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SimulateSuccessResponse {
     pub warnings: Vec<WarningResponse>,
     pub payments: Vec<PaymentResponse>,
@@ -147,7 +164,7 @@ pub struct SimulateSuccessResponse {
     pub contract_yaml: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SimulateErrorResponse {
     pub code: String,
     pub message: String,
@@ -157,20 +174,20 @@ pub struct SimulateErrorResponse {
     pub diagnostics: Option<Vec<ErrorDiagnosticResponse>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorDiagnosticResponse {
     pub code: String,
     pub path: String,
     pub message: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct WarningResponse {
     pub kind: String,
     pub details: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PaymentResponse {
     pub from: Party,
     pub to: PayeeTarget,
@@ -178,7 +195,7 @@ pub struct PaymentResponse {
     pub amount: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct StateResponse {
     pub min_time: String,
     pub accounts: Vec<AccountBalanceResponse>,
@@ -186,20 +203,20 @@ pub struct StateResponse {
     pub bound_values: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AccountBalanceResponse {
     pub owner: Party,
     pub token: Token,
     pub amount: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ChoiceValueResponse {
     pub id: ChoiceId,
     pub value: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SimulatePreviewResponse {
     pub result: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,14 +225,14 @@ pub struct SimulatePreviewResponse {
     pub error: Option<SimulateErrorResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewSuccessResponse {
     pub state: StateResponse,
     pub contract_yaml: String,
     pub inputs: Vec<PreviewInputResponse>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewInputResponse {
     Deposit {
@@ -233,14 +250,69 @@ pub enum PreviewInputResponse {
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct PreviewBoundResponse {
     pub from: String,
     pub to: String,
 }
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(health_handler, simulate_step_handler, simulate_preview_handler),
+    components(
+        schemas(
+            HealthResponse,
+            SimulateStepRequest,
+            SimulateStateRequest,
+            AccountBalanceRequest,
+            ChoiceValueRequest,
+            SimulateTxRequest,
+            SimInputRequest,
+            SimulatePreviewRequest,
+            BigIntValue,
+            SimulateStepResponse,
+            SimulateSuccessResponse,
+            SimulateErrorResponse,
+            ErrorDiagnosticResponse,
+            WarningResponse,
+            PaymentResponse,
+            StateResponse,
+            AccountBalanceResponse,
+            ChoiceValueResponse,
+            SimulatePreviewResponse,
+            PreviewSuccessResponse,
+            PreviewInputResponse,
+            PreviewBoundResponse,
+            Party,
+            Token,
+            ChoiceId,
+            PayeeTarget
+        )
+    ),
+    tags(
+        (name = "health", description = "Service health"),
+        (name = "simulation", description = "Marlowe simulation APIs")
+    )
+)]
+pub struct ApiDoc;
+
+pub fn openapi_json() -> Result<String, serde_json::Error> {
+    serde_json::to_string_pretty(&ApiDoc::openapi())
+}
+
+#[utoipa::path(
+    post,
+    path = "/simulate/step",
+    tag = "simulation",
+    request_body = SimulateStepRequest,
+    responses(
+        (status = 200, description = "Simulation step succeeded", body = SimulateStepResponse),
+        (status = 400, description = "Simulation step rejected", body = SimulateStepResponse),
+        (status = 500, description = "Internal server error", body = SimulateStepResponse)
+    )
+)]
 pub async fn simulate_step_handler(
-    State(_): State<AppState>,
+    _state: State<AppState>,
     Json(request): Json<SimulateStepRequest>,
 ) -> (StatusCode, Json<SimulateStepResponse>) {
     let contract = match parse_contract_yaml(&request.contract_yaml) {
@@ -345,8 +417,19 @@ pub async fn simulate_step_handler(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/simulate/preview",
+    tag = "simulation",
+    request_body = SimulatePreviewRequest,
+    responses(
+        (status = 200, description = "Preview generated", body = SimulatePreviewResponse),
+        (status = 400, description = "Preview rejected", body = SimulatePreviewResponse),
+        (status = 500, description = "Internal server error", body = SimulatePreviewResponse)
+    )
+)]
 pub async fn simulate_preview_handler(
-    State(_): State<AppState>,
+    _state: State<AppState>,
     Json(request): Json<SimulatePreviewRequest>,
 ) -> (StatusCode, Json<SimulatePreviewResponse>) {
     let contract = match parse_contract_yaml(&request.contract_yaml) {
