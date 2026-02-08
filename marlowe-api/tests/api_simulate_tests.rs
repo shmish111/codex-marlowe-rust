@@ -981,4 +981,9 @@ When:
     assert_eq!(json["error"]["subcode"], "NotReadyToRun");
     assert_eq!(json["error"]["path"], "$.contract_yaml");
     assert!(json["error"]["diagnostics"].is_array());
+    let first = &json["error"]["diagnostics"][0];
+    assert!(first["line"].as_u64().unwrap() >= 1);
+    assert!(first["column"].as_u64().unwrap() >= 1);
+    assert!(first["end_line"].as_u64().unwrap() >= first["line"].as_u64().unwrap());
+    assert!(first["end_column"].as_u64().unwrap() >= first["column"].as_u64().unwrap());
 }

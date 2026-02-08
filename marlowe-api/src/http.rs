@@ -208,6 +208,14 @@ pub struct ErrorDiagnosticResponse {
     pub subcode: String,
     pub path: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<usize>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[schema(value_type = Object)]
     pub details: BTreeMap<String, String>,
@@ -561,6 +569,10 @@ pub async fn simulate_step_handler(
                 subcode: "TypeError".to_owned(),
                 path: error.path.clone(),
                 message: error.message.clone(),
+                line: None,
+                column: None,
+                end_line: None,
+                end_column: None,
                 details: BTreeMap::new(),
             });
         }
@@ -577,6 +589,10 @@ pub async fn simulate_step_handler(
                     hole.name,
                     hole.ty.as_str()
                 ),
+                line: None,
+                column: None,
+                end_line: None,
+                end_column: None,
                 details,
             });
         }
@@ -593,6 +609,10 @@ pub async fn simulate_step_handler(
                     param.name,
                     param.ty.as_str()
                 ),
+                line: None,
+                column: None,
+                end_line: None,
+                end_column: None,
                 details,
             });
         }
@@ -721,45 +741,48 @@ pub async fn simulate_preview_handler(
     {
         let mut diagnostics = Vec::new();
         for error in &validation.errors {
-            diagnostics.push(ErrorDiagnosticResponse {
-                code: "Validation".to_owned(),
-                subcode: "TypeError".to_owned(),
-                path: error.path.clone(),
-                message: error.message.clone(),
-                details: BTreeMap::new(),
-            });
+            diagnostics.push(build_preview_diagnostic(
+                &request.contract_yaml,
+                "Validation",
+                "TypeError",
+                error.path.clone(),
+                error.message.clone(),
+                BTreeMap::new(),
+            ));
         }
         for hole in &validation.holes {
             let mut details = BTreeMap::new();
             details.insert("name".to_owned(), hole.name.clone());
             details.insert("type".to_owned(), hole.ty.as_str().to_owned());
-            diagnostics.push(ErrorDiagnosticResponse {
-                code: "Validation".to_owned(),
-                subcode: "HoleUnresolved".to_owned(),
-                path: hole.path.clone(),
-                message: format!(
+            diagnostics.push(build_preview_diagnostic(
+                &request.contract_yaml,
+                "Validation",
+                "HoleUnresolved",
+                hole.path.clone(),
+                format!(
                     "hole '{}' has inferred type {}",
                     hole.name,
                     hole.ty.as_str()
                 ),
                 details,
-            });
+            ));
         }
         for param in &validation.params {
             let mut details = BTreeMap::new();
             details.insert("name".to_owned(), param.name.clone());
             details.insert("type".to_owned(), param.ty.as_str().to_owned());
-            diagnostics.push(ErrorDiagnosticResponse {
-                code: "Validation".to_owned(),
-                subcode: "ParamUnresolved".to_owned(),
-                path: param.path.clone(),
-                message: format!(
+            diagnostics.push(build_preview_diagnostic(
+                &request.contract_yaml,
+                "Validation",
+                "ParamUnresolved",
+                param.path.clone(),
+                format!(
                     "parameter '{}' has inferred type {} and must be instantiated",
                     param.name,
                     param.ty.as_str()
                 ),
                 details,
-            });
+            ));
         }
         return preview_bad_request(
             "ValidationError",
@@ -1305,6 +1328,141 @@ fn preview_input_to_response(input: &PreviewInput) -> PreviewInputResponse {
             warnings: Vec::new(),
         },
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceSpan {
+    line: usize,
+    column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+fn build_preview_diagnostic(
+    contract_yaml: &str,
+    code: &str,
+    subcode: &str,
+    path: String,
+    message: String,
+    details: BTreeMap<String, String>,
+) -> ErrorDiagnosticResponse {
+    let span = locate_diagnostic_span(contract_yaml, &path, subcode, &details);
+    ErrorDiagnosticResponse {
+        code: code.to_owned(),
+        subcode: subcode.to_owned(),
+        path,
+        message,
+        line: span.map(|s| s.line),
+        column: span.map(|s| s.column),
+        end_line: span.map(|s| s.end_line),
+        end_column: span.map(|s| s.end_column),
+        details,
+    }
+}
+
+fn locate_diagnostic_span(
+    source: &str,
+    path: &str,
+    subcode: &str,
+    details: &BTreeMap<String, String>,
+) -> Option<SourceSpan> {
+    if subcode == "HoleUnresolved" {
+        if let Some(name) = details.get("name") {
+            if let Some(span) = find_token_span(source, &format!("?{name}")) {
+                return Some(span);
+            }
+        }
+    }
+    if subcode == "ParamUnresolved" {
+        if let Some(name) = details.get("name") {
+            if let Some(span) = find_token_span(source, &format!("${name}")) {
+                return Some(span);
+            }
+        }
+    }
+    find_path_key_span(source, path)
+}
+
+fn find_token_span(source: &str, token: &str) -> Option<SourceSpan> {
+    for (line_idx, line) in source.lines().enumerate() {
+        if let Some(col_idx) = line.find(token) {
+            return Some(SourceSpan {
+                line: line_idx + 1,
+                column: col_idx + 1,
+                end_line: line_idx + 1,
+                end_column: col_idx + token.len(),
+            });
+        }
+    }
+    None
+}
+
+fn find_path_key_span(source: &str, path: &str) -> Option<SourceSpan> {
+    let keys = path_keys(path);
+    let key = keys.last()?;
+    let token = format!("{key}:");
+    let lines: Vec<&str> = source.lines().collect();
+    let mut best: Option<(usize, usize)> = None;
+    let anchors: Vec<&str> = keys
+        .iter()
+        .take(keys.len().saturating_sub(1))
+        .map(String::as_str)
+        .collect();
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        if let Some(col_idx) = line.find(&token) {
+            let window_start = line_idx.saturating_sub(40);
+            let score = anchors
+                .iter()
+                .filter(|anchor| {
+                    let anchor_token = format!("{}:", anchor);
+                    lines[window_start..=line_idx]
+                        .iter()
+                        .any(|candidate| candidate.contains(&anchor_token))
+                })
+                .count();
+            match best {
+                None => best = Some((line_idx, col_idx)),
+                Some((best_line, _)) => {
+                    let best_window_start = best_line.saturating_sub(40);
+                    let best_score = anchors
+                        .iter()
+                        .filter(|anchor| {
+                            let anchor_token = format!("{}:", anchor);
+                            lines[best_window_start..=best_line]
+                                .iter()
+                                .any(|candidate| candidate.contains(&anchor_token))
+                        })
+                        .count();
+                    if score > best_score {
+                        best = Some((line_idx, col_idx));
+                    }
+                }
+            }
+        }
+    }
+
+    best.map(|(line_idx, col_idx)| SourceSpan {
+        line: line_idx + 1,
+        column: col_idx + 1,
+        end_line: line_idx + 1,
+        end_column: col_idx + key.len(),
+    })
+}
+
+fn path_keys(path: &str) -> Vec<String> {
+    path.strip_prefix("$.")
+        .unwrap_or(path)
+        .split('.')
+        .filter_map(|segment| {
+            let key = segment.split('[').next().unwrap_or("");
+            if key.is_empty() {
+                None
+            } else {
+                Some(key.to_owned())
+            }
+        })
+        .collect()
 }
 
 struct ContextMapError {

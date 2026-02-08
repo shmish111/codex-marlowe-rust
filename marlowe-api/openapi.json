@@ -340,8 +340,36 @@
           "code": {
             "type": "string"
           },
+          "column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
           "details": {
             "type": "object"
+          },
+          "end_column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "end_line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
           },
           "message": {
             "type": "string"
