@@ -130,14 +130,14 @@ pub enum Timeout {
     PosixTime(BigInt),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Party {
     Hole(String),
     Role(String),
     Address(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Token {
     Hole(String),
     Token {
@@ -146,7 +146,7 @@ pub enum Token {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ChoiceId {
     Hole(String),
     ChoiceId { name: String, party: Party },
