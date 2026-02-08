@@ -28,7 +28,7 @@ type SimulationState =
   | { status: 'success'; result: SimulationResponse }
   | { status: 'error'; message: string };
 
-type UnresolvedHole = {
+type UnresolvedItem = {
   name: string;
   expectedType?: string;
 };
@@ -38,28 +38,43 @@ function getDetailString(diagnostic: ValidationDiagnostic, key: string): string 
   return typeof value === 'string' ? value : undefined;
 }
 
-function normalizeHoleName(value: string | undefined): string | undefined {
+function normalizeUnresolvedName(
+  value: string | undefined,
+  preferredPrefix: '?' | '$'
+): string | undefined {
   if (!value) {
     return undefined;
   }
-  return value.startsWith('?') ? value : `?${value}`;
+  if (value.startsWith('?') || value.startsWith('$')) {
+    return value;
+  }
+  return `${preferredPrefix}${value}`;
 }
 
-function getHoleName(diagnostic: ValidationDiagnostic): string | undefined {
-  const detailName = normalizeHoleName(getDetailString(diagnostic, 'name'));
+function isParameterDiagnostic(diagnostic: ValidationDiagnostic): boolean {
+  const subcode = diagnostic.subcode?.toLowerCase() ?? '';
+  if (subcode.includes('param')) {
+    return true;
+  }
+  return diagnostic.message.toLowerCase().includes("parameter '");
+}
+
+function getUnresolvedName(diagnostic: ValidationDiagnostic): string | undefined {
+  const preferredPrefix: '?' | '$' = isParameterDiagnostic(diagnostic) ? '$' : '?';
+  const detailName = normalizeUnresolvedName(getDetailString(diagnostic, 'name'), preferredPrefix);
   if (detailName) {
     return detailName;
   }
 
   const fromMessage =
-    diagnostic.message.match(/\?([A-Za-z_][A-Za-z0-9_]*)/)?.[1] ??
+    diagnostic.message.match(/([?$][A-Za-z_][A-Za-z0-9_]*)/)?.[1] ??
     diagnostic.message.match(/parameter ['"`]([A-Za-z_][A-Za-z0-9_]*)['"`]/i)?.[1];
   if (fromMessage) {
-    return normalizeHoleName(fromMessage);
+    return normalizeUnresolvedName(fromMessage, preferredPrefix);
   }
 
-  const fromPath = diagnostic.path?.match(/\?([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
-  return normalizeHoleName(fromPath);
+  const fromPath = diagnostic.path?.match(/([?$][A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+  return normalizeUnresolvedName(fromPath, preferredPrefix);
 }
 
 function getExpectedType(diagnostic: ValidationDiagnostic): string | undefined {
@@ -75,7 +90,7 @@ function getExpectedType(diagnostic: ValidationDiagnostic): string | undefined {
 }
 
 function isHoleDiagnostic(diagnostic: ValidationDiagnostic): boolean {
-  if (getHoleName(diagnostic)) {
+  if (getUnresolvedName(diagnostic)) {
     return true;
   }
 
@@ -263,7 +278,7 @@ export default function App() {
         ) ?? null)
       : null;
 
-  const unresolvedHoles = useMemo<UnresolvedHole[]>(() => {
+  const unresolvedItems = useMemo<UnresolvedItem[]>(() => {
     if (validationState.status !== 'success' || validationState.valid) {
       return [];
     }
@@ -275,7 +290,7 @@ export default function App() {
         continue;
       }
 
-      const name = getHoleName(diagnostic);
+      const name = getUnresolvedName(diagnostic);
       if (!name) {
         continue;
       }
@@ -416,14 +431,14 @@ export default function App() {
             let endColumn = diagnostic.endColumn ?? column;
 
             if (!line) {
-              const holeName = getHoleName(diagnostic);
-              if (holeName) {
-                const holePosition = findTokenPosition(holeName);
-                if (holePosition) {
-                  line = holePosition.line;
-                  column = holePosition.column;
-                  endLine = holePosition.endLine;
-                  endColumn = holePosition.endColumn;
+              const unresolvedName = getUnresolvedName(diagnostic);
+              if (unresolvedName) {
+                const unresolvedPosition = findTokenPosition(unresolvedName);
+                if (unresolvedPosition) {
+                  line = unresolvedPosition.line;
+                  column = unresolvedPosition.column;
+                  endLine = unresolvedPosition.endLine;
+                  endColumn = unresolvedPosition.endColumn;
                 }
               }
             }
@@ -471,7 +486,7 @@ export default function App() {
                 ? monaco.MarkerSeverity.Warning
                 : monaco.MarkerSeverity.Error,
               message: isHoleDiagnostic(diagnostic)
-                ? `${getHoleName(diagnostic) ?? 'Hole'} type: ${getExpectedType(diagnostic) ?? 'Unknown'}`
+                ? `${getUnresolvedName(diagnostic) ?? 'Placeholder'} type: ${getExpectedType(diagnostic) ?? 'Unknown'}`
                 : diagnostic.message,
               startLineNumber: safeLine,
               startColumn: safeColumn,
@@ -593,14 +608,14 @@ export default function App() {
                 >
                   {validationSummary?.label}
                 </div>
-                {unresolvedHoles.length > 0 ? (
+                {unresolvedItems.length > 0 ? (
                   <div className="panel-block">
-                    <p className="panel-result">Unresolved holes</p>
+                    <p className="panel-result">Unresolved placeholders</p>
                     <ul className="panel-list hole-list">
-                      {unresolvedHoles.map((hole) => (
-                        <li key={hole.name}>
-                          <code>{hole.name}</code>
-                          {` type: ${hole.expectedType ?? 'Unknown'}`}
+                      {unresolvedItems.map((item) => (
+                        <li key={item.name}>
+                          <code>{item.name}</code>
+                          {` type: ${item.expectedType ?? 'Unknown'}`}
                         </li>
                       ))}
                     </ul>
@@ -615,7 +630,7 @@ export default function App() {
                     ))}
                   </ul>
                 )}
-                {validationSummary?.kind === 'incomplete' && unresolvedHoles.length === 0 ? (
+                {validationSummary?.kind === 'incomplete' && unresolvedItems.length === 0 ? (
                   <ul className="panel-list">
                     {validationState.diagnostics.map((diagnostic, index) => (
                       <li key={`${diagnostic.message}-${index}`}>{diagnostic.message}</li>
