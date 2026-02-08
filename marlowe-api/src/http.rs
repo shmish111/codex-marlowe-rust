@@ -8,6 +8,7 @@ use axum::{
 };
 use num_bigint::BigInt;
 use serde::{Deserialize, Serialize};
+use tower_http::cors::{Any, CorsLayer};
 use utoipa::{OpenApi, ToSchema};
 
 use crate::{
@@ -30,6 +31,12 @@ pub fn build_router() -> Router {
         .route("/openapi.json", get(openapi_handler))
         .route("/simulate/step", post(simulate_step_handler))
         .route("/simulate/preview", post(simulate_preview_handler))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .with_state(AppState)
 }
 

@@ -1,6 +1,6 @@
 use axum::{
     body::{to_bytes, Body},
-    http::{Request, StatusCode},
+    http::{header, Request, StatusCode},
 };
 use marlowe_api::http::build_router;
 use serde_json::{json, Value};
@@ -52,6 +52,58 @@ async fn openapi_endpoint_returns_spec() {
     assert_eq!(status, StatusCode::OK);
     assert!(json["paths"]["/simulate/step"].is_object());
     assert!(json["paths"]["/simulate/preview"].is_object());
+}
+
+#[tokio::test]
+async fn cors_header_is_returned_for_origin_request() {
+    let app = build_router();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .method("GET")
+                .header(header::ORIGIN, "http://localhost:5173")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|v| v.to_str().ok()),
+        Some("*")
+    );
+}
+
+#[tokio::test]
+async fn cors_preflight_options_is_handled() {
+    let app = build_router();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/step")
+                .method("OPTIONS")
+                .header(header::ORIGIN, "http://localhost:5173")
+                .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|v| v.to_str().ok()),
+        Some("*")
+    );
 }
 
 #[tokio::test]
