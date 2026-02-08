@@ -465,6 +465,12 @@
                   },
                   "token": {
                     "$ref": "#/components/schemas/Token"
+                  },
+                  "warnings": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/WarningResponse"
+                    }
                   }
                 }
               }
@@ -491,6 +497,12 @@
                   },
                   "id": {
                     "$ref": "#/components/schemas/ChoiceId"
+                  },
+                  "warnings": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/WarningResponse"
+                    }
                   }
                 }
               }
@@ -510,6 +522,12 @@
                 "properties": {
                   "can_notify": {
                     "type": "boolean"
+                  },
+                  "warnings": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/WarningResponse"
+                    }
                   }
                 }
               }
@@ -522,6 +540,7 @@
         "required": [
           "state",
           "contract_yaml",
+          "warnings",
           "inputs"
         ],
         "properties": {
@@ -536,6 +555,12 @@
           },
           "state": {
             "$ref": "#/components/schemas/StateResponse"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WarningResponse"
+            }
           }
         }
       },

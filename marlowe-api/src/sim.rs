@@ -196,6 +196,7 @@ pub enum SimTransactionResult {
 pub struct PreviewResult {
     pub state: SimState,
     pub contract: Contract,
+    pub warnings: Vec<TransactionWarning>,
     pub inputs: Vec<PreviewInput>,
 }
 
@@ -300,6 +301,7 @@ pub fn preview_inputs(
     Ok(PreviewResult {
         state: reduced.state,
         contract: reduced.contract,
+        warnings: reduced.warnings,
         inputs,
     })
 }

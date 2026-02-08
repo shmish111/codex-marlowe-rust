@@ -359,6 +359,7 @@ pub struct SimulatePreviewResponse {
 pub struct PreviewSuccessResponse {
     pub state: StateResponse,
     pub contract_yaml: String,
+    pub warnings: Vec<WarningResponse>,
     pub inputs: Vec<PreviewInputResponse>,
 }
 
@@ -370,13 +371,19 @@ pub enum PreviewInputResponse {
         by: Party,
         token: Token,
         amount: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningResponse>,
     },
     Choice {
         id: ChoiceId,
         bounds: Vec<PreviewBoundResponse>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningResponse>,
     },
     Notify {
         can_notify: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<WarningResponse>,
     },
 }
 
@@ -725,6 +732,7 @@ pub async fn simulate_preview_handler(
                     success: Some(PreviewSuccessResponse {
                         state: state_to_response(&preview.state),
                         contract_yaml,
+                        warnings: preview.warnings.iter().map(warning_to_response).collect(),
                         inputs: preview
                             .inputs
                             .iter()
@@ -1038,6 +1046,16 @@ fn preview_input_to_response(input: &PreviewInput) -> PreviewInputResponse {
             by: by.clone(),
             token: token.clone(),
             amount: amount.to_string(),
+            warnings: if amount <= &BigInt::from(0) {
+                vec![WarningResponse::NonPositiveDeposit {
+                    into: into.clone(),
+                    by: by.clone(),
+                    token: token.clone(),
+                    amount: amount.to_string(),
+                }]
+            } else {
+                Vec::new()
+            },
         },
         PreviewInput::Choice { id, bounds } => PreviewInputResponse::Choice {
             id: id.clone(),
@@ -1048,9 +1066,11 @@ fn preview_input_to_response(input: &PreviewInput) -> PreviewInputResponse {
                     to: to.to_string(),
                 })
                 .collect(),
+            warnings: Vec::new(),
         },
         PreviewInput::Notify { can_notify } => PreviewInputResponse::Notify {
             can_notify: *can_notify,
+            warnings: Vec::new(),
         },
     }
 }

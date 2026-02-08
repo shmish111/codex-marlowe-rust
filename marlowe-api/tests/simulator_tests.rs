@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use marlowe_api::{
-    parse_contract_yaml, simulate_transaction, simulate_transaction_with_trace, AccountId,
-    SimError, SimInput, SimState, SimTransaction, SimTransactionResult, TraceReduceRule, TraceStep,
-    TransactionWarning,
+    parse_contract_yaml, preview_inputs, simulate_transaction, simulate_transaction_with_trace,
+    AccountId, SimError, SimInput, SimState, SimTransaction, SimTransactionResult, TraceReduceRule,
+    TraceStep, TransactionWarning,
 };
 use num_bigint::BigInt;
 
@@ -569,4 +569,25 @@ When:
         }
         other => panic!("unexpected result: {other:?}"),
     }
+}
+
+#[test]
+fn preview_includes_reduction_warnings() {
+    let contract = parse(
+        r#"
+Assert:
+  cond: { "False": {} }
+  then:
+    When:
+      cases: []
+      timeout: { Timeout: 100 }
+      timeout_continuation: { Close: {} }
+"#,
+    );
+
+    let preview = preview_inputs(&contract, &SimState::default(), &b(0), &b(10)).expect("preview");
+    assert!(preview
+        .warnings
+        .iter()
+        .any(|w| matches!(w, TransactionWarning::AssertionFailed)));
 }

@@ -641,9 +641,97 @@ When:
     assert_eq!(response.status(), StatusCode::OK);
     let json = json_response(response).await;
     assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["warnings"].as_array().unwrap().len(), 0);
     assert_eq!(json["success"]["inputs"].as_array().unwrap().len(), 2);
     assert_eq!(json["success"]["inputs"][0]["deposit"]["amount"], "5");
+    assert!(json["success"]["inputs"][0]["deposit"]
+        .get("warnings")
+        .is_none());
     assert_eq!(json["success"]["inputs"][1]["notify"]["can_notify"], true);
+}
+
+#[tokio::test]
+async fn simulate_preview_includes_potential_deposit_warning() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases:
+    - Case:
+        action:
+          Deposit:
+            into: { Role: "Alice" }
+            by: { Role: "Alice" }
+            token: { Token: { currency_symbol: "", token_name: "" } }
+            amount: { Constant: 0 }
+        then: { Close: {} }
+  timeout: { Timeout: 100 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "interval_start": "0",
+      "interval_end": "10"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/preview")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(
+        json["success"]["inputs"][0]["deposit"]["warnings"][0]["code"],
+        "NonPositiveDeposit"
+    );
+    assert_eq!(
+        json["success"]["inputs"][0]["deposit"]["warnings"][0]["amount"],
+        "0"
+    );
+}
+
+#[tokio::test]
+async fn simulate_preview_includes_reduction_warnings() {
+    let app = build_router();
+    let contract = r#"
+Assert:
+  cond: { "False": {} }
+  then:
+    When:
+      cases: []
+      timeout: { Timeout: 100 }
+      timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "interval_start": "0",
+      "interval_end": "10"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/simulate/preview")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["success"]["warnings"][0]["code"], "AssertionFailed");
 }
 
 #[tokio::test]
