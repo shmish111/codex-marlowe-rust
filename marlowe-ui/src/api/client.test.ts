@@ -175,6 +175,41 @@ describe('api client', () => {
     expect(result.inputs[2].kind).toBe('notify');
   });
 
+  it('maps structured warnings from preview responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'next-contract',
+          state: { min_time: '10' },
+          inputs: [],
+          warnings: [
+            {
+              code: 'PartialPay',
+              expected: '100',
+              paid: '80'
+            }
+          ]
+        }
+      })
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await simulateContract('contract-code');
+    expect(result.warnings).toEqual([
+      {
+        code: 'PartialPay',
+        message: 'Partial Pay',
+        fields: [
+          { name: 'expected', value: '100' },
+          { name: 'paid', value: '80' }
+        ]
+      }
+    ]);
+  });
+
   it('posts choice step with state and interval', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -234,7 +269,11 @@ describe('api client', () => {
         success: {
           contract_yaml: 'after-step',
           state: { min_time: '11' },
-          warnings: [],
+          warnings: [
+            {
+              code: 'AssertionFailed'
+            }
+          ],
           trace: [
             {
               event_id: 'evt-1',
@@ -285,6 +324,13 @@ describe('api client', () => {
         contractPath: '$.When.then',
         label: 'Reduced: ReducePay',
         warningCode: undefined
+      }
+    ]);
+    expect(result.warnings).toEqual([
+      {
+        code: 'AssertionFailed',
+        message: 'Assertion Failed',
+        fields: []
       }
     ]);
   });

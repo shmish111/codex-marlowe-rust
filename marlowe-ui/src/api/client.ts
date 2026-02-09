@@ -72,16 +72,22 @@ export type SimulationInput =
 
 export type SimulationResponse = {
   summary: string;
-  warnings: string[];
+  warnings: SimulationWarning[];
   inputs: SimulationInput[];
   context: SimulationContext;
 };
 
 export type SimulationStepResponse = {
   summary: string;
-  warnings: string[];
+  warnings: SimulationWarning[];
   context: SimulationContext;
   traceEvents: SimulationTraceEvent[];
+};
+
+export type SimulationWarning = {
+  code: string;
+  message: string;
+  fields: Array<{ name: string; value: string }>;
 };
 
 export type SimulationTraceEvent = {
@@ -140,6 +146,7 @@ type ApiSimulatePreviewResponse = {
     contract_yaml: string;
     state: ApiSimulateState;
     inputs?: ApiPreviewInput[];
+    warnings?: ApiWarning[];
   } | null;
 };
 
@@ -151,10 +158,14 @@ type ApiSimulateStepResponse = {
   success?: {
     contract_yaml: string;
     state: ApiSimulateState;
-    warnings: Array<{ code?: string }>;
+    warnings: ApiWarning[];
     trace?: ApiTraceEvent[] | null;
   } | null;
 };
+
+type ApiWarning = {
+  code?: string;
+} & Record<string, unknown>;
 
 type ApiTraceInput =
   | {
@@ -323,6 +334,43 @@ function mapPreviewErrorToMessages(error: ApiSimulatePreviewResponse['error']): 
   return error.diagnostics?.map((item) => item.message) ?? [error.message];
 }
 
+function formatWarningCode(code: string): string {
+  return code.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+}
+
+function warningValueToString(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function mapWarnings(warnings: ApiWarning[] | null | undefined): SimulationWarning[] {
+  if (!warnings || warnings.length === 0) {
+    return [];
+  }
+
+  return warnings.map((warning) => {
+    const code = typeof warning.code === 'string' ? warning.code : 'Warning';
+    const fields = Object.entries(warning)
+      .filter(([key]) => key !== 'code')
+      .map(([name, value]) => ({
+        name,
+        value: warningValueToString(value)
+      }));
+
+    return {
+      code,
+      message: formatWarningCode(code),
+      fields
+    };
+  });
+}
+
 function mapPreviewErrorToDiagnostics(
   error: ApiSimulatePreviewResponse['error']
 ): ValidationDiagnostic[] {
@@ -471,7 +519,12 @@ export async function simulateContract(
   });
 
   if (response.data?.error) {
-    const warnings = mapPreviewErrorToMessages(response.data.error);
+    const warningMessages = mapPreviewErrorToMessages(response.data.error);
+    const warnings = warningMessages.map((message) => ({
+      code: 'PreviewError',
+      message,
+      fields: []
+    }));
     return {
       summary: `Preview failed (${response.data.error.subcode})`,
       warnings,
@@ -492,7 +545,7 @@ export async function simulateContract(
   const nextInputs = mapPreviewInputs(response.data.success?.inputs ?? []);
   return {
     summary: `Preview succeeded with ${nextInputs.length} available input(s)`,
-    warnings: [],
+    warnings: mapWarnings(response.data.success?.warnings),
     inputs: nextInputs,
     context: {
       contractYaml: response.data.success?.contract_yaml ?? contractYaml,
@@ -548,13 +601,12 @@ export async function simulateStep(
     throw statusError(response.status);
   }
 
-  const warningCodes =
-    response.data.success?.warnings?.map((warning) => warning.code ?? 'Warning') ?? [];
+  const warnings = mapWarnings(response.data.success?.warnings);
   const nextState = response.data.success?.state ?? context.state;
   const traceEvents = mapTraceEvents(response.data.success?.trace);
   return {
     summary: 'Simulation step applied',
-    warnings: warningCodes,
+    warnings,
     traceEvents,
     context: {
       contractYaml: response.data.success?.contract_yaml ?? context.contractYaml,

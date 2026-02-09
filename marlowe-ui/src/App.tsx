@@ -114,6 +114,10 @@ function renderStateValue(value: unknown): string {
   return stableStringify(value);
 }
 
+function formatWarningFieldName(name: string): string {
+  return name.replace(/_/g, ' ');
+}
+
 function getDetailString(diagnostic: ValidationDiagnostic, key: string): string | undefined {
   const value = diagnostic.details?.[key];
   return typeof value === 'string' ? value : undefined;
@@ -906,7 +910,18 @@ export default function App() {
                 ) : (
                   <ul className="panel-list">
                     {simulationState.result.warnings.map((warning, index) => (
-                      <li key={`${warning}-${index}`}>{warning}</li>
+                      <li key={`${warning.code}-${index}`}>
+                        <strong>{warning.message}</strong>
+                        <span className="panel-hint">Code: {warning.code}</span>
+                        {warning.fields.map((field) => (
+                          <span
+                            key={`${warning.code}-${index}-${field.name}`}
+                            className="panel-hint"
+                          >
+                            {formatWarningFieldName(field.name)}: {field.value}
+                          </span>
+                        ))}
+                      </li>
                     ))}
                   </ul>
                 )}
