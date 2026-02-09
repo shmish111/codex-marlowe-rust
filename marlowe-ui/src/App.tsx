@@ -271,6 +271,7 @@ export default function App() {
   const [simulationCursorSpan, setSimulationCursorSpan] = useState<SimulationSourceSpan | null>(
     null
   );
+  const [selectedTraceIndex, setSelectedTraceIndex] = useState<number | null>(null);
   const [stateChanges, setStateChanges] = useState<string[]>([]);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
@@ -449,6 +450,7 @@ export default function App() {
     setSimulationTraceChunks([]);
     setStateChanges([]);
     setTimeoutTarget('');
+    setSelectedTraceIndex(null);
     setSimulationCursorSpan({ line: 1, column: 1, endLine: 1, endColumn: 1 });
     try {
       await runPreview(code);
@@ -471,13 +473,23 @@ export default function App() {
     () => simulationTraceChunks.flatMap((chunk) => chunk),
     [simulationTraceChunks]
   );
+  const activeTraceIndex = useMemo(() => {
+    if (simulationTrace.length === 0) {
+      return -1;
+    }
+    if (selectedTraceIndex === null) {
+      return simulationTrace.length - 1;
+    }
+    return Math.max(0, Math.min(selectedTraceIndex, simulationTrace.length - 1));
+  }, [simulationTrace, selectedTraceIndex]);
+  const activeTraceEvent = activeTraceIndex >= 0 ? simulationTrace[activeTraceIndex] : null;
   const currentSimulationPath = useMemo(
-    () => simulationTrace[simulationTrace.length - 1]?.contractPath ?? null,
-    [simulationTrace]
+    () => activeTraceEvent?.contractPath ?? null,
+    [activeTraceEvent]
   );
   const currentSimulationSpan = useMemo(
-    () => simulationTrace[simulationTrace.length - 1]?.span ?? simulationCursorSpan,
-    [simulationTrace, simulationCursorSpan]
+    () => activeTraceEvent?.span ?? simulationCursorSpan,
+    [activeTraceEvent, simulationCursorSpan]
   );
 
   const currentSimState =
@@ -710,6 +722,21 @@ export default function App() {
 
     void runValidation(code);
   }, [code, hasUserEdited, apiStatus, runValidation]);
+
+  useEffect(() => {
+    if (selectedTraceIndex === null) {
+      return;
+    }
+
+    if (simulationTrace.length === 0) {
+      setSelectedTraceIndex(null);
+      return;
+    }
+
+    if (selectedTraceIndex > simulationTrace.length - 1) {
+      setSelectedTraceIndex(simulationTrace.length - 1);
+    }
+  }, [selectedTraceIndex, simulationTrace.length]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -1238,14 +1265,29 @@ export default function App() {
                 {simulationTrace.length > 0 ? (
                   <div className="panel-block">
                     <p className="panel-result">Trace</p>
+                    {activeTraceIndex >= 0 && activeTraceIndex < simulationTrace.length - 1 ? (
+                      <button
+                        className="panel-action"
+                        type="button"
+                        onClick={() => setSelectedTraceIndex(null)}
+                      >
+                        Jump to latest event
+                      </button>
+                    ) : null}
                     <ul className="panel-list">
-                      {simulationTrace.map((event) => (
+                      {simulationTrace.map((event, index) => (
                         <li key={event.eventId}>
-                          <strong>{event.label}</strong>
-                          <span className="panel-hint">{event.contractPath}</span>
-                          {event.warningCode ? (
-                            <span className="panel-hint">Warning: {event.warningCode}</span>
-                          ) : null}
+                          <button
+                            className={`trace-event ${index === activeTraceIndex ? 'trace-event--active' : ''}`}
+                            type="button"
+                            onClick={() => setSelectedTraceIndex(index)}
+                          >
+                            <strong>{event.label}</strong>
+                            <span className="panel-hint">{event.contractPath}</span>
+                            {event.warningCode ? (
+                              <span className="panel-hint">Warning: {event.warningCode}</span>
+                            ) : null}
+                          </button>
                         </li>
                       ))}
                     </ul>
