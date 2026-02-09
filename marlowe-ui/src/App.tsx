@@ -9,6 +9,7 @@ import {
 import type {
   SimulationInput,
   SimulationResponse,
+  SimulationSourceSpan,
   SimulationTraceEvent,
   ValidationDiagnostic,
   ValidationExplainItem,
@@ -121,6 +122,28 @@ function renderStateValue(value: unknown): string {
 
 function formatWarningFieldName(name: string): string {
   return name.replace(/_/g, ' ');
+}
+
+function findLineForContractPath(contractPath: string, sourceCode: string): number | null {
+  const lines = sourceCode.split('\n');
+  const tokens = (contractPath.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter(
+    (token) => token !== '$'
+  );
+
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  for (const token of tokens.slice().reverse()) {
+    const pattern = new RegExp(`\\b${token}\\b`);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (pattern.test(lines[index])) {
+        return index + 1;
+      }
+    }
+  }
+
+  return null;
 }
 
 function findNextTimeout(contractYaml: string, minTime: string): string | null {
@@ -245,6 +268,9 @@ export default function App() {
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
   const [simulationHistory, setSimulationHistory] = useState<SimulationResponse[]>([]);
   const [simulationTraceChunks, setSimulationTraceChunks] = useState<SimulationTraceEvent[][]>([]);
+  const [simulationCursorSpan, setSimulationCursorSpan] = useState<SimulationSourceSpan | null>(
+    null
+  );
   const [stateChanges, setStateChanges] = useState<string[]>([]);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
@@ -254,6 +280,7 @@ export default function App() {
   const validationRunIdRef = useRef(0);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
+  const simulationDecorationIdsRef = useRef<string[]>([]);
 
   const activeLanguage = selectedExample?.language ?? 'yaml';
 
@@ -422,6 +449,7 @@ export default function App() {
     setSimulationTraceChunks([]);
     setStateChanges([]);
     setTimeoutTarget('');
+    setSimulationCursorSpan({ line: 1, column: 1, endLine: 1, endColumn: 1 });
     try {
       await runPreview(code);
     } catch (error) {
@@ -442,6 +470,14 @@ export default function App() {
   const simulationTrace = useMemo(
     () => simulationTraceChunks.flatMap((chunk) => chunk),
     [simulationTraceChunks]
+  );
+  const currentSimulationPath = useMemo(
+    () => simulationTrace[simulationTrace.length - 1]?.contractPath ?? null,
+    [simulationTrace]
+  );
+  const currentSimulationSpan = useMemo(
+    () => simulationTrace[simulationTrace.length - 1]?.span ?? simulationCursorSpan,
+    [simulationTrace, simulationCursorSpan]
   );
 
   const currentSimState =
@@ -560,6 +596,13 @@ export default function App() {
         selectedSimulationInput,
         choiceValue
       );
+      const nextCursor =
+        stepResult.traceEvents[stepResult.traceEvents.length - 1]?.span ??
+        stepResult.initialPosition ??
+        null;
+      if (nextCursor) {
+        setSimulationCursorSpan(nextCursor);
+      }
       if (stepResult.traceEvents.length > 0) {
         setSimulationTraceChunks((previous) => [...previous, stepResult.traceEvents]);
       }
@@ -584,6 +627,13 @@ export default function App() {
     setSimulationState({ status: 'loading' });
     try {
       const stepResult = await simulateTimeoutStep(simulationState.result.context, targetTimeout);
+      const nextCursor =
+        stepResult.traceEvents[stepResult.traceEvents.length - 1]?.span ??
+        stepResult.initialPosition ??
+        null;
+      if (nextCursor) {
+        setSimulationCursorSpan(nextCursor);
+      }
       if (stepResult.traceEvents.length > 0) {
         setSimulationTraceChunks((previous) => [...previous, stepResult.traceEvents]);
       }
@@ -605,6 +655,14 @@ export default function App() {
       const nextHistory = previousHistory.slice(0, -1);
       const restored = nextHistory[nextHistory.length - 1];
       setSimulationState({ status: 'success', result: restored });
+      setSimulationTraceChunks((previousChunks) => {
+        const nextChunks = previousChunks.length > 0 ? previousChunks.slice(0, -1) : previousChunks;
+        const nextCursor = nextChunks[nextChunks.length - 1]?.[
+          nextChunks[nextChunks.length - 1].length - 1
+        ]?.span ?? { line: 1, column: 1, endLine: 1, endColumn: 1 };
+        setSimulationCursorSpan(nextCursor);
+        return nextChunks;
+      });
       setTimeoutTarget(
         findNextTimeout(restored.context.contractYaml, restored.context.minTime) ??
           restored.context.minTime
@@ -618,9 +676,6 @@ export default function App() {
         setSelectedInputKey('');
       }
 
-      setSimulationTraceChunks((previousChunks) =>
-        previousChunks.length > 0 ? previousChunks.slice(0, -1) : previousChunks
-      );
       setStateChanges(['Reverted one step']);
       return nextHistory;
     });
@@ -800,6 +855,72 @@ export default function App() {
 
     monaco.editor.setModelMarkers(model, 'validation', markers);
   }, [validationState, code]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco) {
+      return;
+    }
+
+    const model = editor.getModel();
+    if (!model) {
+      return;
+    }
+
+    const resolvedRange =
+      simulationState.status === 'success'
+        ? (() => {
+            if (currentSimulationSpan?.line && currentSimulationSpan?.column) {
+              const startLine = currentSimulationSpan.line;
+              const startColumn = currentSimulationSpan.column;
+              const endLine = currentSimulationSpan.endLine ?? startLine;
+              const endColumn = currentSimulationSpan.endColumn ?? startColumn + 1;
+              return { startLine, startColumn, endLine, endColumn };
+            }
+
+            if (currentSimulationPath) {
+              const lineNumber = findLineForContractPath(currentSimulationPath, code);
+              if (lineNumber) {
+                return {
+                  startLine: lineNumber,
+                  startColumn: 1,
+                  endLine: lineNumber,
+                  endColumn: 1
+                };
+              }
+            }
+
+            return null;
+          })()
+        : null;
+
+    if (!resolvedRange) {
+      simulationDecorationIdsRef.current = editor.deltaDecorations(
+        simulationDecorationIdsRef.current,
+        []
+      );
+      return;
+    }
+
+    simulationDecorationIdsRef.current = editor.deltaDecorations(
+      simulationDecorationIdsRef.current,
+      [
+        {
+          range: new monaco.Range(
+            resolvedRange.startLine,
+            resolvedRange.startColumn,
+            resolvedRange.endLine,
+            resolvedRange.endColumn
+          ),
+          options: {
+            isWholeLine: resolvedRange.startLine === resolvedRange.endLine,
+            className: 'simulation-current-line'
+          }
+        }
+      ]
+    );
+  }, [simulationState.status, currentSimulationPath, currentSimulationSpan, code]);
 
   const renderInputLabel = (input: SimulationInput): string => {
     if (input.kind === 'choice') {
@@ -1046,6 +1167,9 @@ export default function App() {
             {simulationState.status === 'success' ? (
               <div className="panel-block">
                 <p className="panel-result">{simulationState.result.summary}</p>
+                {currentSimulationPath ? (
+                  <p className="panel-result">Current path: {currentSimulationPath}</p>
+                ) : null}
                 {simulationState.result.inputs.length > 0 ? (
                   <div className="choice-form">
                     <label className="choice-form__label" htmlFor="input-select">

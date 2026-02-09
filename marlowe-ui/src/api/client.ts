@@ -82,6 +82,7 @@ export type SimulationStepResponse = {
   warnings: SimulationWarning[];
   context: SimulationContext;
   traceEvents: SimulationTraceEvent[];
+  initialPosition?: SimulationSourceSpan;
 };
 
 export type SimulationWarning = {
@@ -96,6 +97,14 @@ export type SimulationTraceEvent = {
   contractPath: string;
   label: string;
   warningCode?: string;
+  span?: SimulationSourceSpan;
+};
+
+export type SimulationSourceSpan = {
+  line: number;
+  column: number;
+  endLine?: number;
+  endColumn?: number;
 };
 
 type ApiDiagnostic = {
@@ -160,6 +169,7 @@ type ApiSimulateStepResponse = {
     state: ApiSimulateState;
     warnings: ApiWarning[];
     trace?: ApiTraceEvent[] | null;
+    initial_position?: ApiSourceSpan | null;
   } | null;
 };
 
@@ -190,6 +200,10 @@ type ApiTraceEventReduced = {
   contract_path: string;
   rule: string;
   warning?: { code?: string } | null;
+  line?: number | null;
+  column?: number | null;
+  end_line?: number | null;
+  end_column?: number | null;
 };
 
 type ApiTraceEventInputApplied = {
@@ -199,9 +213,20 @@ type ApiTraceEventInputApplied = {
   input_index: number;
   input: ApiTraceInput;
   warning?: { code?: string } | null;
+  line?: number | null;
+  column?: number | null;
+  end_line?: number | null;
+  end_column?: number | null;
 };
 
 type ApiTraceEvent = ApiTraceEventReduced | ApiTraceEventInputApplied;
+
+type ApiSourceSpan = {
+  line?: number | null;
+  column?: number | null;
+  end_line?: number | null;
+  end_column?: number | null;
+};
 
 type ApiTypecheckExplainItem = {
   code: string;
@@ -301,6 +326,26 @@ function traceInputLabel(input: ApiTraceInput): string {
   return 'notify';
 }
 
+function mapSourceSpan(span: ApiSourceSpan | null | undefined): SimulationSourceSpan | undefined {
+  if (
+    !span ||
+    typeof span.line !== 'number' ||
+    typeof span.column !== 'number' ||
+    span.line < 1 ||
+    span.column < 1
+  ) {
+    return undefined;
+  }
+
+  return {
+    line: span.line,
+    column: span.column,
+    endLine: typeof span.end_line === 'number' && span.end_line > 0 ? span.end_line : undefined,
+    endColumn:
+      typeof span.end_column === 'number' && span.end_column > 0 ? span.end_column : undefined
+  };
+}
+
 function mapTraceEvents(trace: ApiTraceEvent[] | null | undefined): SimulationTraceEvent[] {
   if (!trace || trace.length === 0) {
     return [];
@@ -313,7 +358,8 @@ function mapTraceEvents(trace: ApiTraceEvent[] | null | undefined): SimulationTr
         code: event.code,
         contractPath: event.contract_path,
         label: `Input applied: ${traceInputLabel(event.input)}`,
-        warningCode: event.warning?.code
+        warningCode: event.warning?.code,
+        span: mapSourceSpan(event)
       };
     }
 
@@ -322,7 +368,8 @@ function mapTraceEvents(trace: ApiTraceEvent[] | null | undefined): SimulationTr
       code: event.code,
       contractPath: event.contract_path,
       label: `Reduced: ${event.rule}`,
-      warningCode: event.warning?.code
+      warningCode: event.warning?.code,
+      span: mapSourceSpan(event)
     };
   });
 }
@@ -608,6 +655,7 @@ export async function simulateStep(
     summary: 'Simulation step applied',
     warnings,
     traceEvents,
+    initialPosition: mapSourceSpan(response.data.success?.initial_position),
     context: {
       contractYaml: response.data.success?.contract_yaml ?? context.contractYaml,
       state: nextState,
@@ -646,6 +694,7 @@ export async function simulateTimeoutStep(
     summary: `Advanced to timeout ${nextTimeout}`,
     warnings,
     traceEvents,
+    initialPosition: mapSourceSpan(response.data.success?.initial_position),
     context: {
       contractYaml: response.data.success?.contract_yaml ?? context.contractYaml,
       state: nextState,
