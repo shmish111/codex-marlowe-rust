@@ -875,6 +875,16 @@
           "contract_yaml": {
             "type": "string"
           },
+          "initial_position": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SourceLocationResponse"
+              }
+            ]
+          },
           "payments": {
             "type": "array",
             "items": {
@@ -921,6 +931,37 @@
           "interval_start": {
             "type": "string",
             "example": "0"
+          }
+        }
+      },
+      "SourceLocationResponse": {
+        "type": "object",
+        "required": [
+          "line",
+          "column"
+        ],
+        "properties": {
+          "column": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_column": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "end_line": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       },
@@ -1014,6 +1055,13 @@
                   "Reduced"
                 ]
               },
+              "column": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
               "contract_path": {
                 "type": "string"
               },
@@ -1027,8 +1075,29 @@
                   }
                 ]
               },
+              "end_column": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "end_line": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
               "event_id": {
                 "type": "string"
+              },
+              "line": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
               },
               "payment": {
                 "oneOf": [
@@ -1077,6 +1146,13 @@
                   "InputApplied"
                 ]
               },
+              "column": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
               "contract_path": {
                 "type": "string"
               },
@@ -1090,6 +1166,20 @@
                   }
                 ]
               },
+              "end_column": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "end_line": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
               "event_id": {
                 "type": "string"
               },
@@ -1098,6 +1188,13 @@
               },
               "input_index": {
                 "type": "integer",
+                "minimum": 0
+              },
+              "line": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
                 "minimum": 0
               },
               "state_paths": {

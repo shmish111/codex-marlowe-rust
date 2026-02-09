@@ -380,6 +380,7 @@ When:
         0
     );
     assert!(json["success"].get("trace").is_none());
+    assert!(json["success"].get("initial_position").is_none());
 }
 
 #[tokio::test]
@@ -429,6 +430,18 @@ Pay:
     let json = json_response(response).await;
     let trace = json["success"]["trace"].as_array().expect("trace array");
     assert!(!trace.is_empty());
+    assert!(
+        json["success"]["initial_position"]["line"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
+    assert!(
+        json["success"]["initial_position"]["column"]
+            .as_u64()
+            .unwrap()
+            >= 1
+    );
     assert_eq!(trace[0]["event_id"], "trace-0000");
     assert_eq!(trace[0]["code"], "Reduced");
     assert_eq!(trace[0]["rule"], "Pay");
@@ -451,6 +464,8 @@ Pay:
         .unwrap()
         .iter()
         .any(|path| path == "$.accounts"));
+    assert!(trace[0]["line"].as_u64().unwrap() >= 1);
+    assert!(trace[0]["column"].as_u64().unwrap() >= 1);
 }
 
 #[tokio::test]
@@ -523,6 +538,8 @@ When:
         .unwrap()
         .iter()
         .any(|path| path == "$.accounts"));
+    assert!(input_event["line"].as_u64().unwrap() >= 1);
+    assert!(input_event["column"].as_u64().unwrap() >= 1);
 }
 
 #[tokio::test]

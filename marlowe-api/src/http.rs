@@ -189,6 +189,8 @@ pub struct SimulateSuccessResponse {
     pub contract_yaml: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace: Option<Vec<TraceEventResponse>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_position: Option<SourceLocationResponse>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -258,6 +260,14 @@ pub enum TraceEventResponse {
         event_id: String,
         rule: String,
         contract_path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        column: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        end_line: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        end_column: Option<usize>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         state_paths: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -271,6 +281,14 @@ pub enum TraceEventResponse {
         event_id: String,
         input_index: usize,
         contract_path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        column: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        end_line: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        end_column: Option<usize>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         state_paths: Vec<String>,
         input: TraceInputResponse,
@@ -279,6 +297,16 @@ pub enum TraceEventResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         delta: Option<TraceStateDeltaResponse>,
     },
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SourceLocationResponse {
+    pub line: usize,
+    pub column: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_column: Option<usize>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -664,9 +692,24 @@ pub async fn simulate_step_handler(
                         .trace
                         .iter()
                         .enumerate()
-                        .map(|(idx, step)| trace_step_to_response(idx, step))
+                        .map(|(idx, step)| {
+                            trace_step_to_response(idx, step, &request.contract_yaml)
+                        })
                         .collect(),
                 )
+            } else {
+                None
+            };
+
+            let initial_position = if request.trace {
+                locate_root_contract_span(&request.contract_yaml).map(|span| {
+                    SourceLocationResponse {
+                        line: span.line,
+                        column: span.column,
+                        end_line: Some(span.end_line),
+                        end_column: Some(span.end_column),
+                    }
+                })
             } else {
                 None
             };
@@ -679,6 +722,7 @@ pub async fn simulate_step_handler(
                     state: state_to_response(&success.state),
                     contract_yaml,
                     trace,
+                    initial_position,
                 }),
                 error: None,
             };
@@ -1115,7 +1159,11 @@ fn warning_to_response(warning: &TransactionWarning) -> WarningResponse {
     }
 }
 
-fn trace_step_to_response(index: usize, step: &TraceStep) -> TraceEventResponse {
+fn trace_step_to_response(
+    index: usize,
+    step: &TraceStep,
+    contract_source: &str,
+) -> TraceEventResponse {
     let event_id = format!("trace-{index:04}");
     match step {
         TraceStep::Reduced {
@@ -1124,31 +1172,66 @@ fn trace_step_to_response(index: usize, step: &TraceStep) -> TraceEventResponse 
             warning,
             payment,
             delta,
-        } => TraceEventResponse::Reduced {
-            event_id,
-            rule: trace_rule_name(rule).to_owned(),
-            contract_path: contract_path.clone(),
-            state_paths: trace_state_paths(delta.as_ref()),
-            warning: warning.as_ref().map(warning_to_response),
-            payment: payment.as_ref().map(payment_to_response),
-            delta: delta.as_ref().map(state_delta_to_response),
-        },
+        } => {
+            let span = trace_step_span_for_reduced(contract_source, contract_path, rule);
+            TraceEventResponse::Reduced {
+                line: span.map(|s| s.line),
+                column: span.map(|s| s.column),
+                end_line: span.map(|s| s.end_line),
+                end_column: span.map(|s| s.end_column),
+                event_id,
+                rule: trace_rule_name(rule).to_owned(),
+                contract_path: contract_path.clone(),
+                state_paths: trace_state_paths(delta.as_ref()),
+                warning: warning.as_ref().map(warning_to_response),
+                payment: payment.as_ref().map(payment_to_response),
+                delta: delta.as_ref().map(state_delta_to_response),
+            }
+        }
         TraceStep::InputApplied {
             input_index,
             contract_path,
+            next_contract_path,
             input,
             warning,
             delta,
-        } => TraceEventResponse::InputApplied {
-            event_id,
-            input_index: *input_index,
-            contract_path: contract_path.clone(),
-            state_paths: trace_state_paths(delta.as_ref()),
-            input: trace_input_to_response(input),
-            warning: warning.as_ref().map(warning_to_response),
-            delta: delta.as_ref().map(state_delta_to_response),
-        },
+        } => {
+            let span = trace_step_span_for_input(contract_source, next_contract_path);
+            TraceEventResponse::InputApplied {
+                line: span.map(|s| s.line),
+                column: span.map(|s| s.column),
+                end_line: span.map(|s| s.end_line),
+                end_column: span.map(|s| s.end_column),
+                event_id,
+                input_index: *input_index,
+                contract_path: contract_path.clone(),
+                state_paths: trace_state_paths(delta.as_ref()),
+                input: trace_input_to_response(input),
+                warning: warning.as_ref().map(warning_to_response),
+                delta: delta.as_ref().map(state_delta_to_response),
+            }
+        }
     }
+}
+
+fn trace_step_span_for_reduced(
+    source: &str,
+    contract_path: &str,
+    rule: &TraceReduceRule,
+) -> Option<SourceSpan> {
+    let constructor = match rule {
+        TraceReduceRule::CloseRefund => "Close",
+        TraceReduceRule::Pay => "Pay",
+        TraceReduceRule::IfBranch => "If",
+        TraceReduceRule::WhenTimeout => "When",
+        TraceReduceRule::Let => "Let",
+        TraceReduceRule::Assert => "Assert",
+    };
+    find_constructor_span(source, contract_path, constructor)
+}
+
+fn trace_step_span_for_input(source: &str, continuation_path: &str) -> Option<SourceSpan> {
+    find_path_key_span(source, continuation_path)
 }
 
 fn trace_state_paths(delta: Option<&StateDelta>) -> Vec<String> {
@@ -1463,6 +1546,63 @@ fn path_keys(path: &str) -> Vec<String> {
             }
         })
         .collect()
+}
+
+fn locate_root_contract_span(source: &str) -> Option<SourceSpan> {
+    let constructors = ["Close", "Pay", "If", "When", "Let", "Assert"];
+    for (line_idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        for constructor in constructors {
+            let token = format!("{constructor}:");
+            if trimmed.starts_with(&token) {
+                let indent = line.len() - trimmed.len();
+                return Some(SourceSpan {
+                    line: line_idx + 1,
+                    column: indent + 1,
+                    end_line: line_idx + 1,
+                    end_column: indent + constructor.len(),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn find_constructor_span(source: &str, path: &str, constructor: &str) -> Option<SourceSpan> {
+    let token = format!("{constructor}:");
+    let keys = path_keys(path);
+    let anchors: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let lines: Vec<&str> = source.lines().collect();
+    let mut best: Option<(usize, usize, usize)> = None;
+
+    for (line_idx, line) in lines.iter().enumerate() {
+        if let Some(col_idx) = line.find(&token) {
+            let window_start = line_idx.saturating_sub(60);
+            let score = anchors
+                .iter()
+                .filter(|anchor| {
+                    let anchor_token = format!("{}:", anchor);
+                    lines[window_start..=line_idx]
+                        .iter()
+                        .any(|candidate| candidate.contains(&anchor_token))
+                })
+                .count();
+            match best {
+                None => best = Some((score, line_idx, col_idx)),
+                Some((best_score, _, _)) if score > best_score => {
+                    best = Some((score, line_idx, col_idx))
+                }
+                _ => {}
+            }
+        }
+    }
+
+    best.map(|(_, line_idx, col_idx)| SourceSpan {
+        line: line_idx + 1,
+        column: col_idx + 1,
+        end_line: line_idx + 1,
+        end_column: col_idx + constructor.len(),
+    })
 }
 
 struct ContextMapError {

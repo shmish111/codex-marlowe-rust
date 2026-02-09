@@ -117,6 +117,7 @@ pub enum TraceStep {
     InputApplied {
         input_index: usize,
         contract_path: String,
+        next_contract_path: String,
         input: SimInput,
         warning: Option<TransactionWarning>,
         delta: Option<StateDelta>,
@@ -398,6 +399,7 @@ fn apply_all_inputs(
                 trace.push(TraceStep::InputApplied {
                     input_index: index,
                     contract_path: applied.contract_path.clone(),
+                    next_contract_path: applied.next_contract_path.clone(),
                     input: input.clone(),
                     warning: Some(warning),
                     delta: state_delta(&current_state, &applied.state),
@@ -407,6 +409,7 @@ fn apply_all_inputs(
             trace.push(TraceStep::InputApplied {
                 input_index: index,
                 contract_path: applied.contract_path.clone(),
+                next_contract_path: applied.next_contract_path.clone(),
                 input: input.clone(),
                 warning: None,
                 delta: state_delta(&current_state, &applied.state),
