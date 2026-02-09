@@ -615,3 +615,41 @@ export async function simulateStep(
     }
   };
 }
+
+export async function simulateTimeoutStep(
+  context: SimulationContext,
+  nextTimeout: string
+): Promise<SimulationStepResponse> {
+  const response = await requestJson<ApiSimulateStepResponse>('/api/simulate/step', {
+    contract_yaml: context.contractYaml,
+    state: context.state ?? undefined,
+    trace: true,
+    transaction: {
+      interval_start: nextTimeout,
+      interval_end: nextTimeout,
+      inputs: []
+    }
+  });
+
+  if (response.data?.error) {
+    throw new Error(response.data.error.message);
+  }
+
+  if (!response.ok || !response.data) {
+    throw statusError(response.status);
+  }
+
+  const warnings = mapWarnings(response.data.success?.warnings);
+  const nextState = response.data.success?.state ?? context.state;
+  const traceEvents = mapTraceEvents(response.data.success?.trace);
+  return {
+    summary: `Advanced to timeout ${nextTimeout}`,
+    warnings,
+    traceEvents,
+    context: {
+      contractYaml: response.data.success?.contract_yaml ?? context.contractYaml,
+      state: nextState,
+      minTime: getMinTime(nextState)
+    }
+  };
+}

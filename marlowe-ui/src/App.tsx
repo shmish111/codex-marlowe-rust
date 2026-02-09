@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { simulateContract, simulateStep, validateContract } from './api/client';
+import {
+  simulateContract,
+  simulateStep,
+  simulateTimeoutStep,
+  validateContract
+} from './api/client';
 import type {
   SimulationInput,
   SimulationResponse,
@@ -118,6 +123,46 @@ function formatWarningFieldName(name: string): string {
   return name.replace(/_/g, ' ');
 }
 
+function findNextTimeout(contractYaml: string, minTime: string): string | null {
+  const current = Number.parseInt(minTime, 10);
+  if (!Number.isFinite(current)) {
+    return null;
+  }
+
+  const candidates = new Set<number>();
+  const timeoutObjectPattern = /timeout:\s*\{\s*Timeout:\s*"?(\d+)"?\s*\}/g;
+  const timeoutNestedPattern = /timeout:\s*\n[ \t]+Timeout:\s*"?(\d+)"?/g;
+  const timeoutScalarPattern = /timeout:\s*"?(\d+)"?/g;
+
+  for (const match of contractYaml.matchAll(timeoutObjectPattern)) {
+    const value = Number.parseInt(match[1], 10);
+    if (Number.isFinite(value)) {
+      candidates.add(value);
+    }
+  }
+
+  for (const match of contractYaml.matchAll(timeoutNestedPattern)) {
+    const value = Number.parseInt(match[1], 10);
+    if (Number.isFinite(value)) {
+      candidates.add(value);
+    }
+  }
+
+  for (const match of contractYaml.matchAll(timeoutScalarPattern)) {
+    const value = Number.parseInt(match[1], 10);
+    if (Number.isFinite(value)) {
+      candidates.add(value);
+    }
+  }
+
+  const nextValues = Array.from(candidates).filter((value) => value > current);
+  if (nextValues.length === 0) {
+    return null;
+  }
+
+  return String(Math.min(...nextValues));
+}
+
 function getDetailString(diagnostic: ValidationDiagnostic, key: string): string | undefined {
   const value = diagnostic.details?.[key];
   return typeof value === 'string' ? value : undefined;
@@ -198,13 +243,14 @@ export default function App() {
   const [apiMessage, setApiMessage] = useState('API is not connected.');
   const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
-  const [simulationTrace, setSimulationTrace] = useState<SimulationTraceEvent[]>([]);
-  const [, setStateSnapshots] = useState<Array<Record<string, unknown> | null>>([]);
+  const [simulationHistory, setSimulationHistory] = useState<SimulationResponse[]>([]);
+  const [simulationTraceChunks, setSimulationTraceChunks] = useState<SimulationTraceEvent[][]>([]);
   const [stateChanges, setStateChanges] = useState<string[]>([]);
   const [isSimulationRunning, setSimulationRunning] = useState(false);
   const [hasUserEdited, setHasUserEdited] = useState(false);
   const [selectedInputKey, setSelectedInputKey] = useState<string>('');
   const [choiceValue, setChoiceValue] = useState<string>('0');
+  const [timeoutTarget, setTimeoutTarget] = useState<string>('');
   const validationRunIdRef = useRef(0);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
@@ -289,12 +335,23 @@ export default function App() {
   const runPreview = async (yaml: string, state: Record<string, unknown> | null = null) => {
     const result = await simulateContract(yaml, state);
     setSimulationState({ status: 'success', result });
-    setStateSnapshots((previousSnapshots) => {
+    setSimulationHistory((previousHistory) => {
       const previousState =
-        previousSnapshots.length > 0 ? previousSnapshots[previousSnapshots.length - 1] : null;
-      const nextState = result.context.state ?? null;
-      setStateChanges(summarizeStateDiff(previousState, nextState));
-      return [...previousSnapshots, nextState];
+        previousHistory.length > 0
+          ? (previousHistory[previousHistory.length - 1].context.state ?? null)
+          : null;
+      setStateChanges(summarizeStateDiff(previousState, result.context.state ?? null));
+      return [...previousHistory, result];
+    });
+    const suggestedTimeout = findNextTimeout(result.context.contractYaml, result.context.minTime);
+    setTimeoutTarget((previousTarget) => {
+      if (suggestedTimeout) {
+        return suggestedTimeout;
+      }
+      if (previousTarget) {
+        return previousTarget;
+      }
+      return result.context.minTime;
     });
 
     if (result.inputs[0]) {
@@ -361,9 +418,10 @@ export default function App() {
 
     setSimulationRunning(true);
     setSimulationState({ status: 'loading' });
-    setSimulationTrace([]);
-    setStateSnapshots([]);
+    setSimulationHistory([]);
+    setSimulationTraceChunks([]);
     setStateChanges([]);
+    setTimeoutTarget('');
     try {
       await runPreview(code);
     } catch (error) {
@@ -380,6 +438,11 @@ export default function App() {
           (input) => JSON.stringify(input) === selectedInputKey
         ) ?? null)
       : null;
+
+  const simulationTrace = useMemo(
+    () => simulationTraceChunks.flatMap((chunk) => chunk),
+    [simulationTraceChunks]
+  );
 
   const currentSimState =
     simulationState.status === 'success' ? simulationState.result.context.state : null;
@@ -469,6 +532,21 @@ export default function App() {
       ? validationState.readyToRun
       : validationState.valid && validationState.diagnostics.length === 0);
 
+  const nextTimeout =
+    simulationState.status === 'success'
+      ? findNextTimeout(
+          simulationState.result.context.contractYaml,
+          simulationState.result.context.minTime
+        )
+      : null;
+  const canAdvanceTimeout =
+    simulationState.status === 'success' &&
+    (() => {
+      const target = Number.parseInt(timeoutTarget, 10);
+      const current = Number.parseInt(simulationState.result.context.minTime, 10);
+      return Number.isFinite(target) && Number.isFinite(current) && target >= current;
+    })();
+
   const handleApplyInput = async () => {
     if (simulationState.status !== 'success' || !selectedSimulationInput) {
       return;
@@ -483,7 +561,7 @@ export default function App() {
         choiceValue
       );
       if (stepResult.traceEvents.length > 0) {
-        setSimulationTrace((previous) => [...previous, ...stepResult.traceEvents]);
+        setSimulationTraceChunks((previous) => [...previous, stepResult.traceEvents]);
       }
       await runPreview(stepResult.context.contractYaml, stepResult.context.state);
     } catch (error) {
@@ -492,6 +570,68 @@ export default function App() {
     } finally {
       setSimulationRunning(false);
     }
+  };
+
+  const handleAdvanceTimeout = async () => {
+    if (simulationState.status !== 'success' || !canAdvanceTimeout) {
+      return;
+    }
+
+    const parsedTarget = Number.parseInt(timeoutTarget, 10);
+    const targetTimeout = String(parsedTarget);
+
+    setSimulationRunning(true);
+    setSimulationState({ status: 'loading' });
+    try {
+      const stepResult = await simulateTimeoutStep(simulationState.result.context, targetTimeout);
+      if (stepResult.traceEvents.length > 0) {
+        setSimulationTraceChunks((previous) => [...previous, stepResult.traceEvents]);
+      }
+      await runPreview(stepResult.context.contractYaml, stepResult.context.state);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setSimulationState({ status: 'error', message });
+    } finally {
+      setSimulationRunning(false);
+    }
+  };
+
+  const handleUndoStep = () => {
+    setSimulationHistory((previousHistory) => {
+      if (previousHistory.length <= 1) {
+        return previousHistory;
+      }
+
+      const nextHistory = previousHistory.slice(0, -1);
+      const restored = nextHistory[nextHistory.length - 1];
+      setSimulationState({ status: 'success', result: restored });
+      setTimeoutTarget(
+        findNextTimeout(restored.context.contractYaml, restored.context.minTime) ??
+          restored.context.minTime
+      );
+      if (restored.inputs[0]) {
+        setSelectedInputKey(JSON.stringify(restored.inputs[0]));
+        if (restored.inputs[0].kind === 'choice') {
+          setChoiceValue(restored.inputs[0].bounds[0]?.from ?? '0');
+        }
+      } else {
+        setSelectedInputKey('');
+      }
+
+      setSimulationTraceChunks((previousChunks) =>
+        previousChunks.length > 0 ? previousChunks.slice(0, -1) : previousChunks
+      );
+      setStateChanges(['Reverted one step']);
+      return nextHistory;
+    });
+  };
+
+  const handleRestartSimulation = async () => {
+    if (!canRunSimulation) {
+      return;
+    }
+
+    await handleSimulate();
   };
 
   useEffect(() => {
@@ -835,14 +975,60 @@ export default function App() {
           <section className="tool-section">
             <h2>Simulation</h2>
             {canRunSimulation ? (
-              <button
-                className="panel-action"
-                type="button"
-                onClick={handleSimulate}
-                disabled={apiStatus !== 'connected' || isSimulationRunning}
-              >
-                Run simulation
-              </button>
+              <div className="choice-form">
+                <button
+                  className="panel-action"
+                  type="button"
+                  onClick={handleSimulate}
+                  disabled={apiStatus !== 'connected' || isSimulationRunning}
+                >
+                  Run simulation
+                </button>
+                <button
+                  className="panel-action"
+                  type="button"
+                  onClick={handleAdvanceTimeout}
+                  disabled={!canAdvanceTimeout || apiStatus !== 'connected' || isSimulationRunning}
+                >
+                  Set simulation time
+                </button>
+                <label className="choice-form__label" htmlFor="timeout-target">
+                  Timeout target
+                </label>
+                <input
+                  id="timeout-target"
+                  className="choice-form__input"
+                  value={timeoutTarget}
+                  onChange={(event) => setTimeoutTarget(event.target.value)}
+                  placeholder={nextTimeout ?? 'Enter POSIX time'}
+                />
+                {nextTimeout ? (
+                  <button
+                    className="panel-action"
+                    type="button"
+                    onClick={() => setTimeoutTarget(nextTimeout)}
+                    disabled={apiStatus !== 'connected' || isSimulationRunning}
+                  >
+                    Use next timeout ({nextTimeout})
+                  </button>
+                ) : null}
+                <button
+                  className="panel-action"
+                  type="button"
+                  onClick={handleUndoStep}
+                  disabled={simulationHistory.length <= 1 || isSimulationRunning}
+                >
+                  Undo step
+                </button>
+                <button
+                  className="panel-action"
+                  type="button"
+                  onClick={() => void handleRestartSimulation()}
+                  disabled={apiStatus !== 'connected' || isSimulationRunning}
+                >
+                  Restart simulation
+                </button>
+              </div>
             ) : (
               <p className="panel-result">Fix validation issues to enable simulation.</p>
             )}

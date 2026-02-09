@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { simulateContract, simulateStep, validateContract } from './client';
+import { simulateContract, simulateStep, simulateTimeoutStep, validateContract } from './client';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -333,5 +333,42 @@ describe('api client', () => {
         fields: []
       }
     ]);
+  });
+
+  it('posts timeout step with empty inputs', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'ok',
+        success: {
+          contract_yaml: 'after-timeout',
+          state: { min_time: '20' },
+          warnings: []
+        }
+      })
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await simulateTimeoutStep(
+      { contractYaml: 'contract-code', state: { min_time: '10' }, minTime: '10' },
+      '20'
+    );
+
+    expect(result.summary).toContain('20');
+    expect(fetchMock).toHaveBeenCalledWith('/api/simulate/step', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'contract-code',
+        state: { min_time: '10' },
+        trace: true,
+        transaction: {
+          interval_start: '20',
+          interval_end: '20',
+          inputs: []
+        }
+      })
+    });
   });
 });
