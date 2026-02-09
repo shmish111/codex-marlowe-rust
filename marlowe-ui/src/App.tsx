@@ -54,6 +54,14 @@ type UnresolvedItem = {
   expectedType?: string;
 };
 
+type DiagnosticResolvedRange = {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  hasExplicitEndColumn: boolean;
+};
+
 function stableStringify(value: unknown): string {
   try {
     return JSON.stringify(value);
@@ -122,6 +130,118 @@ function renderStateValue(value: unknown): string {
 
 function formatWarningFieldName(name: string): string {
   return name.replace(/_/g, ' ');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findTokenPosition(token: string, sourceCode: string): DiagnosticResolvedRange | null {
+  if (!token) {
+    return null;
+  }
+
+  const lines = sourceCode.split('\n');
+  const pattern = new RegExp(`\\b${escapeRegExp(token)}\\b`);
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineText = lines[index];
+    const match = pattern.exec(lineText);
+    if (match && typeof match.index === 'number') {
+      const startColumn = match.index + 1;
+      return {
+        line: index + 1,
+        column: startColumn,
+        endLine: index + 1,
+        endColumn: startColumn + token.length,
+        hasExplicitEndColumn: false
+      };
+    }
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const lineText = lines[index];
+    const charIndex = lineText.indexOf(token);
+    if (charIndex >= 0) {
+      const startColumn = charIndex + 1;
+      return {
+        line: index + 1,
+        column: startColumn,
+        endLine: index + 1,
+        endColumn: startColumn + token.length,
+        hasExplicitEndColumn: false
+      };
+    }
+  }
+
+  return null;
+}
+
+function resolveDiagnosticRange(
+  diagnostic: ValidationDiagnostic,
+  sourceCode: string
+): DiagnosticResolvedRange {
+  const lines = sourceCode.split('\n');
+  const fromMessage = diagnostic.message.match(/line\s+(\d+)(?:\D+column\s+(\d+))?/i);
+
+  const hasExplicitEndColumn = typeof diagnostic.endColumn === 'number';
+  let line = diagnostic.line ?? Number(fromMessage?.[1] ?? 0);
+  let column = diagnostic.column ?? Number(fromMessage?.[2] ?? 0);
+  let endLine = diagnostic.endLine ?? line;
+  let endColumn = diagnostic.endColumn ?? column;
+
+  if (!line) {
+    const unresolvedName = getUnresolvedName(diagnostic);
+    if (unresolvedName) {
+      const unresolvedPosition = findTokenPosition(unresolvedName, sourceCode);
+      if (unresolvedPosition) {
+        line = unresolvedPosition.line;
+        column = unresolvedPosition.column;
+        endLine = unresolvedPosition.endLine;
+        endColumn = unresolvedPosition.endColumn;
+      }
+    }
+  }
+
+  if (!line) {
+    const messageTokens = Array.from(
+      diagnostic.message.matchAll(/['"`]([?A-Za-z_][?A-Za-z0-9_]*)['"`]/g)
+    ).map((match) => match[1]);
+
+    const pathTokens = diagnostic.path
+      ? (diagnostic.path.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter((token) => token !== '$')
+      : [];
+
+    const tokenCandidates = Array.from(new Set([...messageTokens, ...pathTokens.reverse()]));
+    for (const token of tokenCandidates) {
+      const tokenPosition = findTokenPosition(token, sourceCode);
+      if (tokenPosition) {
+        line = tokenPosition.line;
+        column = tokenPosition.column;
+        endLine = tokenPosition.endLine;
+        endColumn = tokenPosition.endColumn;
+        break;
+      }
+    }
+  }
+
+  const safeLine = line > 0 ? line : 1;
+  const safeColumn = column > 0 ? column : 1;
+  const safeEndLine = endLine && endLine > 0 ? endLine : safeLine;
+  const endLineText = lines[safeEndLine - 1] ?? '';
+  const safeEndColumn =
+    endColumn && endColumn > 0
+      ? hasExplicitEndColumn
+        ? endColumn + 1
+        : endColumn
+      : Math.max(safeColumn + 1, endLineText.length + 1);
+
+  return {
+    line: safeLine,
+    column: safeColumn,
+    endLine: safeEndLine,
+    endColumn: Math.max(safeEndColumn, safeColumn + 1),
+    hasExplicitEndColumn
+  };
 }
 
 function findLineForContractPath(contractPath: string, sourceCode: string): number | null {
@@ -701,6 +821,29 @@ export default function App() {
     await handleSimulate();
   };
 
+  const jumpToDiagnostic = useCallback(
+    (diagnostic: ValidationDiagnostic) => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) {
+        return;
+      }
+
+      const range = resolveDiagnosticRange(diagnostic, code);
+      editor.focus();
+      editor.revealLineInCenter(range.line);
+      editor.setSelection(
+        new monaco.Range(
+          range.line,
+          range.column,
+          range.endLine,
+          Math.max(range.endColumn, range.column + 1)
+        )
+      );
+    },
+    [code]
+  );
+
   useEffect(() => {
     if (!hasUserEdited) {
       return;
@@ -755,106 +898,10 @@ export default function App() {
       return;
     }
 
-    const lines = code.split('\n');
-    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const findTokenPosition = (token: string) => {
-      if (!token) {
-        return null;
-      }
-
-      const pattern = new RegExp(`\\b${escapeRegExp(token)}\\b`);
-      for (let index = 0; index < lines.length; index += 1) {
-        const lineText = lines[index];
-        const match = pattern.exec(lineText);
-        if (match && typeof match.index === 'number') {
-          const startColumn = match.index + 1;
-          return {
-            line: index + 1,
-            column: startColumn,
-            endLine: index + 1,
-            endColumn: startColumn + token.length
-          };
-        }
-      }
-
-      for (let index = 0; index < lines.length; index += 1) {
-        const lineText = lines[index];
-        const charIndex = lineText.indexOf(token);
-        if (charIndex >= 0) {
-          const startColumn = charIndex + 1;
-          return {
-            line: index + 1,
-            column: startColumn,
-            endLine: index + 1,
-            endColumn: startColumn + token.length
-          };
-        }
-      }
-
-      return null;
-    };
-
     const markers: Monaco.editor.IMarkerData[] =
       validationState.diagnostics.length > 0
         ? validationState.diagnostics.map((diagnostic) => {
-            const fromMessage = diagnostic.message.match(/line\s+(\d+)(?:\D+column\s+(\d+))?/i);
-
-            const hasExplicitEndColumn = typeof diagnostic.endColumn === 'number';
-            let line = diagnostic.line ?? Number(fromMessage?.[1] ?? 0);
-            let column = diagnostic.column ?? Number(fromMessage?.[2] ?? 0);
-            let endLine = diagnostic.endLine ?? line;
-            let endColumn = diagnostic.endColumn ?? column;
-
-            if (!line) {
-              const unresolvedName = getUnresolvedName(diagnostic);
-              if (unresolvedName) {
-                const unresolvedPosition = findTokenPosition(unresolvedName);
-                if (unresolvedPosition) {
-                  line = unresolvedPosition.line;
-                  column = unresolvedPosition.column;
-                  endLine = unresolvedPosition.endLine;
-                  endColumn = unresolvedPosition.endColumn;
-                }
-              }
-            }
-
-            if (!line) {
-              const messageTokens = Array.from(
-                diagnostic.message.matchAll(/['"`]([?A-Za-z_][?A-Za-z0-9_]*)['"`]/g)
-              ).map((match) => match[1]);
-
-              const pathTokens = diagnostic.path
-                ? (diagnostic.path.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).filter(
-                    (token) => token !== '$'
-                  )
-                : [];
-
-              const tokenCandidates = Array.from(
-                new Set([...messageTokens, ...pathTokens.reverse()])
-              );
-
-              for (const token of tokenCandidates) {
-                const tokenPosition = findTokenPosition(token);
-                if (tokenPosition) {
-                  line = tokenPosition.line;
-                  column = tokenPosition.column;
-                  endLine = tokenPosition.endLine;
-                  endColumn = tokenPosition.endColumn;
-                  break;
-                }
-              }
-            }
-
-            const safeLine = line > 0 ? line : 1;
-            const safeColumn = column > 0 ? column : 1;
-            const safeEndLine = endLine && endLine > 0 ? endLine : safeLine;
-            const endLineText = lines[safeEndLine - 1] ?? '';
-            const safeEndColumn =
-              endColumn && endColumn > 0
-                ? hasExplicitEndColumn
-                  ? endColumn + 1
-                  : endColumn
-                : Math.max(safeColumn + 1, endLineText.length + 1);
+            const range = resolveDiagnosticRange(diagnostic, code);
 
             return {
               severity: isHoleDiagnostic(diagnostic)
@@ -863,10 +910,10 @@ export default function App() {
               message: isHoleDiagnostic(diagnostic)
                 ? `${getUnresolvedName(diagnostic) ?? 'Placeholder'} type: ${getExpectedType(diagnostic) ?? 'Unknown'}`
                 : diagnostic.message,
-              startLineNumber: safeLine,
-              startColumn: safeColumn,
-              endLineNumber: safeEndLine,
-              endColumn: Math.max(safeEndColumn, safeColumn + 1)
+              startLineNumber: range.line,
+              startColumn: range.column,
+              endLineNumber: range.endLine,
+              endColumn: range.endColumn
             };
           })
         : [
@@ -1103,16 +1150,32 @@ export default function App() {
                 {validationState.diagnostics.length === 0 ? (
                   <p className="panel-result">No diagnostics.</p>
                 ) : validationSummary?.kind === 'incomplete' ? null : (
-                  <ul className="panel-list">
+                  <ul className="panel-list panel-list--interactive">
                     {validationState.diagnostics.map((diagnostic, index) => (
-                      <li key={`${diagnostic.message}-${index}`}>{diagnostic.message}</li>
+                      <li key={`${diagnostic.message}-${index}`}>
+                        <button
+                          className="panel-link-button"
+                          type="button"
+                          onClick={() => jumpToDiagnostic(diagnostic)}
+                        >
+                          {diagnostic.message}
+                        </button>
+                      </li>
                     ))}
                   </ul>
                 )}
                 {validationSummary?.kind === 'incomplete' && unresolvedItems.length === 0 ? (
-                  <ul className="panel-list">
+                  <ul className="panel-list panel-list--interactive">
                     {validationState.diagnostics.map((diagnostic, index) => (
-                      <li key={`${diagnostic.message}-${index}`}>{diagnostic.message}</li>
+                      <li key={`${diagnostic.message}-${index}`}>
+                        <button
+                          className="panel-link-button"
+                          type="button"
+                          onClick={() => jumpToDiagnostic(diagnostic)}
+                        >
+                          {diagnostic.message}
+                        </button>
+                      </li>
                     ))}
                   </ul>
                 ) : null}

@@ -276,9 +276,28 @@ h2 {
   margin-top: 4px;
 }
 
+.panel-list--interactive {
+  list-style: none;
+  padding-left: 0;
+}
+
 .panel-list strong {
   display: block;
   color: var(--vscode-foreground);
+}
+
+.panel-link-button {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  padding: 4px 6px;
+  color: var(--vscode-foreground);
+}
+
+.panel-link-button:hover {
+  border-color: var(--vscode-border);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .panel-hint {
