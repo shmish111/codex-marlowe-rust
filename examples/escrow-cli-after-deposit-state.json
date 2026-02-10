@@ -1,0 +1,19 @@
+{
+  "min_time": "0",
+  "accounts": [
+    {
+      "owner": {
+        "Role": "Buyer"
+      },
+      "token": {
+        "Token": {
+          "currency_symbol": "",
+          "token_name": ""
+        }
+      },
+      "amount": "1000000"
+    }
+  ],
+  "choices": [],
+  "bound_values": {}
+}

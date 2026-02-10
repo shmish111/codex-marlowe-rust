@@ -7,6 +7,8 @@ Rust API for Extended Marlowe contracts:
 - simulate one transaction step or preview available inputs
 - expose OpenAPI from Rust source definitions
 
+This crate is also used directly by `/Users/davidsmith/code/codex-marlowe-rust/marlowe-cli` for embedded, non-HTTP contract workflows.
+
 ## DSL support
 
 The library understands the schema defined in `/Users/davidsmith/code/codex-marlowe-rust/extended-marlowe.yaml`.

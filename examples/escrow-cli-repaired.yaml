@@ -1,0 +1,131 @@
+When:
+  cases:
+  - Case:
+      action:
+        Deposit:
+          into:
+            Role: Buyer
+          by:
+            Role: Buyer
+          token:
+            Token:
+              currency_symbol: ''
+              token_name: ''
+          amount:
+            Constant: '1000000'
+      then:
+        When:
+          cases:
+          - Case:
+              action:
+                Choice:
+                  id:
+                    ChoiceId:
+                      name: release
+                      party:
+                        Role: Buyer
+                  bounds:
+                  - Bound:
+                      from:
+                        Constant: '1'
+                      to:
+                        Constant: '1'
+              then:
+                Pay:
+                  from:
+                    Role: Buyer
+                  token:
+                    Token:
+                      currency_symbol: ''
+                      token_name: ''
+                  amount:
+                    Constant: '1000000'
+                  then:
+                    Close: {}
+                  to_party:
+                    Role: Seller
+          - Case:
+              action:
+                Choice:
+                  id:
+                    ChoiceId:
+                      name: dispute
+                      party:
+                        Role: Buyer
+                  bounds:
+                  - Bound:
+                      from:
+                        Constant: '1'
+                      to:
+                        Constant: '1'
+              then:
+                When:
+                  cases:
+                  - Case:
+                      action:
+                        Choice:
+                          id:
+                            ChoiceId:
+                              name: mediator_release
+                              party:
+                                Role: Mediator
+                          bounds:
+                          - Bound:
+                              from:
+                                Constant: '1'
+                              to:
+                                Constant: '1'
+                      then:
+                        Pay:
+                          from:
+                            Role: Buyer
+                          token:
+                            Token:
+                              currency_symbol: ''
+                              token_name: ''
+                          amount:
+                            Constant: '1000000'
+                          then:
+                            Close: {}
+                          to_party:
+                            Role: Seller
+                  - Case:
+                      action:
+                        Choice:
+                          id:
+                            ChoiceId:
+                              name: mediator_refund
+                              party:
+                                Role: Mediator
+                          bounds:
+                          - Bound:
+                              from:
+                                Constant: '1'
+                              to:
+                                Constant: '1'
+                      then:
+                        Pay:
+                          from:
+                            Role: Buyer
+                          token:
+                            Token:
+                              currency_symbol: ''
+                              token_name: ''
+                          amount:
+                            Constant: '1000000'
+                          then:
+                            Close: {}
+                          to_party:
+                            Role: Buyer
+                  timeout:
+                    Timeout: '300'
+                  timeout_continuation:
+                    Close: {}
+          timeout:
+            Timeout: '200'
+          timeout_continuation:
+            Close: {}
+  timeout:
+    Timeout: '100'
+  timeout_continuation:
+    Close: {}

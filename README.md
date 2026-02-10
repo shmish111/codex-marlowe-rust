@@ -1,31 +1,45 @@
-# Marlowe Studio (React + Monaco)
+# Marlowe Studio
 
-This repository contains a Marlowe contract editing and simulation UI built with React and Monaco Editor.
+This repository includes both a human-oriented web UI and an embedded CLI for AI-agent workflows.
 
 ## What is included
 
-- `marlowe-ui`: Frontend app (React, TypeScript, Vite, Monaco)
-- `examples`: Example contracts used by the UI
+- `marlowe-ui`: frontend app (React, TypeScript, Vite, Monaco)
+- `marlowe-api`: Rust library + HTTP server for parse/typecheck/simulate/analyze
+- `marlowe-cli`: embedded CLI that uses `marlowe-api` directly (no HTTP required)
+- `examples`: sample contracts
 
-## Frontend features
+## CLI quick start (embedded mode)
 
-- Monaco editor for YAML contracts
-- Example loader modal
-- Auto-validation with debounce
-- Validation diagnostics with inline editor markers
-- Incomplete contract detection (unresolved holes/parameters)
-- Simulation panel gated by validation status
-- Step-by-step simulation input application
+From `marlowe-cli`:
 
-## Prerequisites
+```bash
+cargo run -- validate --in ../examples/simple-pay.yaml
+cargo run -- preview --in ../examples/simple-pay.yaml --interval-start 0 --interval-end 0
+cargo run -- analyze --in ../examples/simple-pay.yaml --property deadline-safety
+```
 
-- Node.js 18+
-- npm
-- Backend API available (default OpenAPI URL in UI: `http://127.0.0.1:3000/openapi.json`)
+Useful commands:
 
-## Run the app
+- `validate`
+- `preview`
+- `step`
+- `analyze`
+- `repair`
+- `version`
 
-From the UI directory:
+## Web UI quick start
+
+The UI expects the API server at `http://127.0.0.1:3000`.
+
+Start API:
+
+```bash
+cd marlowe-api
+cargo run
+```
+
+Start UI:
 
 ```bash
 cd marlowe-ui
@@ -33,27 +47,9 @@ npm install
 npm run dev
 ```
 
-Then open the URL shown by Vite (usually `http://127.0.0.1:5173`).
-
-## Quality checks
-
-From `marlowe-ui`:
-
-```bash
-npm run format
-npm run lint
-npm run test
-```
-
-## API endpoints used by the frontend
-
-- `POST /simulate/preview`
-- `POST /simulate/step`
-- `POST /typecheck/explain` (available for richer validation UX)
-- `GET /health`
-- `GET /openapi.json`
+Then open the Vite URL (usually `http://127.0.0.1:5173`).
 
 ## Notes
 
-- Simulation is enabled only when contract validation is fully successful.
-- If API connectivity fails, a warning is shown in the header.
+- The analyzer currently requires `z3` in `PATH`.
+- UI simulation is enabled only when validation is fully successful.
