@@ -44,6 +44,8 @@ Exposed routes:
 
 - `GET /health`
 - `GET /openapi.json`
+- `POST /analyze/counterexample`
+- `POST /analyze/apply-repair`
 - `POST /simulate/step`
 - `POST /simulate/preview`
 - `POST /typecheck/explain`
@@ -111,6 +113,46 @@ Request supports optional type-check context:
 Context entries must be concrete (no holes), otherwise request is rejected with `RequestError/ContextError`.
 
 Malformed JSON requests across major POST endpoints are normalized to structured `RequestError/InvalidJson` responses (instead of framework-default 422 payloads).
+
+## Counterexample endpoint
+
+`POST /analyze/counterexample` provides bounded, property-driven checks with witness generation.
+
+Current MVP property support:
+
+- `deadline_safety`
+- `authorization_safety`
+
+`deadline_safety` checks whether any `When` timeout can continue to a non-`Close` contract. If found, the endpoint returns:
+
+- `status = "counterexample_found"`
+- violating contract path
+- timeout value
+- a concrete witness time satisfying timeout constraints
+- `steps[]` timeline entries for UI rendering (`id`, `kind`, `severity`, `path`, optional `actor`, optional `time`, `detail`, `suggested_fix`)
+- optional `auto_repair_patch` with a deterministic patch proposal (`kind`, `path`, `value`, `rationale`) when a safe rewrite is available
+
+`POST /analyze/apply-repair` runs analyze -> patch (if available) -> analyze again:
+
+- returns `before` and optional `after` analysis summaries
+- returns `patched_contract_yaml` when a patch is applied
+- returns `repaired = false` when no deterministic safe patch is available
+
+`authorization_safety` checks that actions are only triggerable by an allowed party set:
+
+- configurable rule fields: `action` (`deposit` or `choice`), optional `target` (choice name), and `allowed_parties`
+- returns violating action path, offending party, and `steps[]` witness timeline when found
+
+If no violation is found in the explored contract nodes, it returns:
+
+- `status = "pass_bounded"`
+
+Important limitations:
+
+- bounded/structural analysis only; this is not an unbounded proof
+- unresolved holes/params are rejected
+- concrete `Timeout` literals are required for this property in MVP
+- analyzer currently requires `z3` binary in `PATH`
 
 ## Testing
 

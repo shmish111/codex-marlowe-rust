@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import {
+  analyzeContract,
+  applyDeterministicRepair,
   simulateContract,
   simulateStep,
   simulateTimeoutStep,
   validateContract
 } from './api/client';
 import type {
+  AnalysisProperty,
+  AnalysisResult,
+  AnalysisRequestOptions,
   SimulationInput,
   SimulationResponse,
   SimulationSourceSpan,
@@ -47,6 +52,18 @@ type SimulationState =
   | { status: 'idle' }
   | { status: 'loading' }
   | { status: 'success'; result: SimulationResponse }
+  | { status: 'error'; message: string };
+
+type AnalysisState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; result: AnalysisResult }
+  | { status: 'error'; message: string };
+
+type RepairState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; message: string }
   | { status: 'error'; message: string };
 
 type UnresolvedItem = {
@@ -375,6 +392,30 @@ function isHoleDiagnostic(diagnostic: ValidationDiagnostic): boolean {
   return diagnostic.message.toLowerCase().includes('must be instantiated');
 }
 
+function buildAnalysisOptions(
+  property: AnalysisProperty,
+  action: 'deposit' | 'choice',
+  target: string,
+  allowedRoles: string
+): AnalysisRequestOptions {
+  if (property !== 'authorization_safety') {
+    return { property };
+  }
+
+  return {
+    property,
+    authorizationRule: {
+      action,
+      target: action === 'choice' && target.trim() ? target.trim() : undefined,
+      allowedParties: allowedRoles
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+        .map((role) => ({ Role: role }))
+    }
+  };
+}
+
 export default function App() {
   const [isModalOpen, setModalOpen] = useState(false);
   const [selectedExample, setSelectedExample] = useState<Example | null>(null);
@@ -386,6 +427,12 @@ export default function App() {
   const [apiMessage, setApiMessage] = useState('API is not connected.');
   const [validationState, setValidationState] = useState<ValidationState>({ status: 'idle' });
   const [simulationState, setSimulationState] = useState<SimulationState>({ status: 'idle' });
+  const [analysisState, setAnalysisState] = useState<AnalysisState>({ status: 'idle' });
+  const [repairState, setRepairState] = useState<RepairState>({ status: 'idle' });
+  const [analysisProperty, setAnalysisProperty] = useState<AnalysisProperty>('deadline_safety');
+  const [authorizationAction, setAuthorizationAction] = useState<'deposit' | 'choice'>('choice');
+  const [authorizationTarget, setAuthorizationTarget] = useState<string>('');
+  const [authorizationAllowedRoles, setAuthorizationAllowedRoles] = useState<string>('alice');
   const [simulationHistory, setSimulationHistory] = useState<SimulationResponse[]>([]);
   const [simulationTraceChunks, setSimulationTraceChunks] = useState<SimulationTraceEvent[][]>([]);
   const [simulationCursorSpan, setSimulationCursorSpan] = useState<SimulationSourceSpan | null>(
@@ -819,6 +866,67 @@ export default function App() {
     }
 
     await handleSimulate();
+  };
+
+  const handleAnalyze = async () => {
+    const connected = await ensureApiConnection();
+    if (!connected) {
+      setAnalysisState({ status: 'error', message: 'API not connected.' });
+      return;
+    }
+
+    setAnalysisState({ status: 'loading' });
+    setRepairState({ status: 'idle' });
+    try {
+      const options = buildAnalysisOptions(
+        analysisProperty,
+        authorizationAction,
+        authorizationTarget,
+        authorizationAllowedRoles
+      );
+      const result = await analyzeContract(code, options);
+      setAnalysisState({ status: 'success', result });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setAnalysisState({ status: 'error', message });
+    }
+  };
+
+  const handleApplyRepair = async () => {
+    const connected = await ensureApiConnection();
+    if (!connected) {
+      setRepairState({ status: 'error', message: 'API not connected.' });
+      return;
+    }
+
+    setRepairState({ status: 'loading' });
+    try {
+      const options = buildAnalysisOptions(
+        analysisProperty,
+        authorizationAction,
+        authorizationTarget,
+        authorizationAllowedRoles
+      );
+      const result = await applyDeterministicRepair(code, options);
+      if (result.patchedContractYaml) {
+        setCode(result.patchedContractYaml);
+        setHasUserEdited(true);
+      }
+      if (result.after) {
+        setAnalysisState({ status: 'success', result: result.after });
+      } else {
+        setAnalysisState({ status: 'success', result: result.before });
+      }
+      setRepairState({
+        status: 'success',
+        message: result.repaired
+          ? 'Repair applied and contract re-analyzed.'
+          : 'No deterministic repair available for current analysis.'
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setRepairState({ status: 'error', message });
+    }
   };
 
   const jumpToDiagnostic = useCallback(
@@ -1412,6 +1520,166 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+            ) : null}
+          </section>
+
+          <section className="tool-section">
+            <h2>Analysis &amp; Repair</h2>
+            <div className="choice-form">
+              <label className="choice-form__label" htmlFor="analysis-property">
+                Property
+              </label>
+              <select
+                id="analysis-property"
+                className="choice-form__select"
+                value={analysisProperty}
+                onChange={(event) => {
+                  setAnalysisProperty(event.target.value as AnalysisProperty);
+                  setAnalysisState({ status: 'idle' });
+                  setRepairState({ status: 'idle' });
+                }}
+              >
+                <option value="deadline_safety">deadline_safety</option>
+                <option value="authorization_safety">authorization_safety</option>
+              </select>
+              {analysisProperty === 'authorization_safety' ? (
+                <>
+                  <label className="choice-form__label" htmlFor="authorization-action">
+                    Authorization action
+                  </label>
+                  <select
+                    id="authorization-action"
+                    className="choice-form__select"
+                    value={authorizationAction}
+                    onChange={(event) =>
+                      setAuthorizationAction(event.target.value as 'deposit' | 'choice')
+                    }
+                  >
+                    <option value="choice">choice</option>
+                    <option value="deposit">deposit</option>
+                  </select>
+                  {authorizationAction === 'choice' ? (
+                    <>
+                      <label className="choice-form__label" htmlFor="authorization-target">
+                        Choice target (optional)
+                      </label>
+                      <input
+                        id="authorization-target"
+                        className="choice-form__input"
+                        value={authorizationTarget}
+                        onChange={(event) => setAuthorizationTarget(event.target.value)}
+                        placeholder="release_funds"
+                      />
+                    </>
+                  ) : null}
+                  <label className="choice-form__label" htmlFor="authorization-roles">
+                    Allowed roles (comma-separated)
+                  </label>
+                  <input
+                    id="authorization-roles"
+                    className="choice-form__input"
+                    value={authorizationAllowedRoles}
+                    onChange={(event) => setAuthorizationAllowedRoles(event.target.value)}
+                    placeholder="alice,bob"
+                  />
+                </>
+              ) : null}
+              <button
+                className="panel-action"
+                type="button"
+                onClick={handleAnalyze}
+                disabled={!canRunSimulation || apiStatus !== 'connected' || analysisState.status === 'loading'}
+              >
+                Run analysis
+              </button>
+              <button
+                className="panel-action"
+                type="button"
+                onClick={handleApplyRepair}
+                disabled={
+                  !(
+                    analysisState.status === 'success' &&
+                    analysisState.result.status === 'counterexample_found' &&
+                    analysisState.result.counterexample?.autoRepairPatch
+                  ) || apiStatus !== 'connected' || repairState.status === 'loading'
+                }
+              >
+                Apply deterministic repair
+              </button>
+            </div>
+            {analysisState.status === 'idle' ? (
+              <p className="panel-result">Run analysis to detect safety counterexamples.</p>
+            ) : null}
+            {analysisState.status === 'loading' ? (
+              <p className="panel-result">Analysis in progress...</p>
+            ) : null}
+            {analysisState.status === 'error' ? (
+              <p className="panel-result panel-result--error">Analysis failed: {analysisState.message}</p>
+            ) : null}
+            {analysisState.status === 'success' ? (
+              <div className="panel-block">
+                <p className="panel-result">
+                  Property: <code>{analysisState.result.property}</code>
+                </p>
+                <div
+                  className={`panel-badge ${
+                    analysisState.result.status === 'pass_bounded'
+                      ? 'panel-badge--ok'
+                      : 'panel-badge--error'
+                  }`}
+                >
+                  {analysisState.result.status === 'pass_bounded'
+                    ? 'No counterexample (bounded)'
+                    : 'Counterexample found'}
+                </div>
+                <p className="panel-result">Checked nodes: {analysisState.result.checkedNodes}</p>
+                {analysisState.result.counterexample ? (
+                  <div className="panel-block">
+                    <p className="panel-result">{analysisState.result.counterexample.explanation}</p>
+                    <p className="panel-result">
+                      Path: <code>{analysisState.result.counterexample.violatingPath}</code>
+                    </p>
+                    {analysisState.result.counterexample.autoRepairPatch ? (
+                      <div className="panel-block">
+                        <p className="panel-result">
+                          Patch: <code>{analysisState.result.counterexample.autoRepairPatch.kind}</code>
+                        </p>
+                        <p className="panel-hint">
+                          {analysisState.result.counterexample.autoRepairPatch.rationale}
+                        </p>
+                      </div>
+                    ) : null}
+                    {analysisState.result.counterexample.steps.length > 0 ? (
+                      <div className="panel-block">
+                        <p className="panel-result">Witness timeline</p>
+                        <ul className="panel-list">
+                          {analysisState.result.counterexample.steps.map((step) => (
+                            <li key={step.id}>
+                              <strong>
+                                [{step.severity}] {step.kind}
+                              </strong>
+                              <span className="panel-hint">
+                                <code>{step.path}</code>
+                              </span>
+                              <span className="panel-hint">{step.detail}</span>
+                              <span className="panel-hint">Suggested fix: {step.suggestedFix}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {repairState.status === 'loading' ? (
+              <p className="panel-result">Applying repair...</p>
+            ) : null}
+            {repairState.status === 'success' ? (
+              <p className="panel-result">{repairState.message}</p>
+            ) : null}
+            {repairState.status === 'error' ? (
+              <p className="panel-result panel-result--error">Repair failed: {repairState.message}</p>
             ) : null}
           </section>
         </aside>

@@ -13,6 +13,11 @@ use tower_http::cors::{Any, CorsLayer};
 use utoipa::{OpenApi, ToSchema};
 
 use crate::{
+    analyze::{
+        analyze_authorization_safety, analyze_deadline_safety, apply_auto_repair_patch,
+        AuthorizationAction, AuthorizationRule, Counterexample, CounterexampleRequest,
+        CounterexampleResult,
+    },
     ast::{ChoiceId, Party, PayeeTarget, Token},
     contract_to_yaml_string, parse_contract_yaml,
     sim::{
@@ -30,6 +35,8 @@ pub fn build_router() -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/openapi.json", get(openapi_handler))
+        .route("/analyze/counterexample", post(analyze_counterexample_handler))
+        .route("/analyze/apply-repair", post(analyze_apply_repair_handler))
         .route("/simulate/step", post(simulate_step_handler))
         .route("/simulate/preview", post(simulate_preview_handler))
         .route("/typecheck/explain", post(typecheck_explain_handler))
@@ -469,6 +476,135 @@ pub struct TypecheckExplainSuccessResponse {
     pub warnings: Vec<TypecheckExplainItemResponse>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AnalyzeCounterexampleRequest {
+    pub contract_yaml: String,
+    #[serde(default)]
+    pub property: AnalyzePropertyRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_rule: Option<AuthorizationRuleRequest>,
+    #[serde(default = "default_counterexample_bound")]
+    pub max_nodes: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyzePropertyRequest {
+    #[default]
+    DeadlineSafety,
+    AuthorizationSafety,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct AuthorizationRuleRequest {
+    pub action: AuthorizationActionRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub allowed_parties: Vec<Party>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizationActionRequest {
+    Deposit,
+    Choice,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeCounterexampleResponse {
+    pub result: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<AnalyzeCounterexampleSuccessResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<SimulateErrorResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeCounterexampleSuccessResponse {
+    pub property: &'static str,
+    pub status: &'static str,
+    pub checked_nodes: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterexample: Option<AnalyzeCounterexampleWitnessResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeCounterexampleWitnessResponse {
+    pub violating_path: String,
+    pub explanation: String,
+    pub steps: Vec<AnalyzeCounterexampleStepResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_repair_patch: Option<AnalyzeAutoRepairPatchResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witness_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offending_party: Option<Party>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeCounterexampleStepResponse {
+    pub id: String,
+    pub index: usize,
+    pub kind: String,
+    pub severity: String,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<Party>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+    pub detail: String,
+    pub suggested_fix: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeAutoRepairPatchResponse {
+    pub kind: String,
+    pub path: String,
+    pub value: String,
+    pub rationale: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AnalyzeApplyRepairRequest {
+    pub contract_yaml: String,
+    #[serde(default)]
+    pub property: AnalyzePropertyRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_rule: Option<AuthorizationRuleRequest>,
+    #[serde(default = "default_counterexample_bound")]
+    pub max_nodes: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeApplyRepairResponse {
+    pub result: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<AnalyzeApplyRepairSuccessResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<SimulateErrorResponse>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AnalyzeApplyRepairSuccessResponse {
+    pub property: &'static str,
+    pub repaired: bool,
+    pub before: AnalyzeCounterexampleSuccessResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after: Option<AnalyzeCounterexampleSuccessResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patched_contract_yaml: Option<String>,
+}
+
+fn default_counterexample_bound() -> usize {
+    512
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TypecheckExplainSummaryResponse {
     pub blocking_count: usize,
@@ -494,6 +630,8 @@ pub struct TypecheckExplainItemResponse {
     paths(
         health_handler,
         openapi_handler,
+        analyze_counterexample_handler,
+        analyze_apply_repair_handler,
         simulate_step_handler,
         simulate_preview_handler,
         typecheck_explain_handler
@@ -528,6 +666,18 @@ pub struct TypecheckExplainItemResponse {
             TypecheckExplainSuccessResponse,
             TypecheckExplainSummaryResponse,
             TypecheckExplainItemResponse,
+            AnalyzeCounterexampleRequest,
+            AnalyzePropertyRequest,
+            AuthorizationRuleRequest,
+            AuthorizationActionRequest,
+            AnalyzeCounterexampleResponse,
+            AnalyzeCounterexampleSuccessResponse,
+            AnalyzeCounterexampleWitnessResponse,
+            AnalyzeCounterexampleStepResponse,
+            AnalyzeAutoRepairPatchResponse,
+            AnalyzeApplyRepairRequest,
+            AnalyzeApplyRepairResponse,
+            AnalyzeApplyRepairSuccessResponse,
             Party,
             Token,
             ChoiceId,
@@ -543,6 +693,284 @@ pub struct ApiDoc;
 
 pub fn openapi_json() -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&ApiDoc::openapi())
+}
+
+#[utoipa::path(
+    post,
+    path = "/analyze/counterexample",
+    tag = "simulation",
+    request_body = AnalyzeCounterexampleRequest,
+    responses(
+        (status = 200, description = "Analysis completed", body = AnalyzeCounterexampleResponse),
+        (status = 400, description = "Analysis request rejected", body = AnalyzeCounterexampleResponse)
+    )
+)]
+pub async fn analyze_counterexample_handler(
+    _state: State<AppState>,
+    request: Result<Json<AnalyzeCounterexampleRequest>, JsonRejection>,
+) -> (StatusCode, Json<AnalyzeCounterexampleResponse>) {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            return analyze_bad_request(
+                "RequestError",
+                "InvalidJson",
+                err.body_text(),
+                Some("$.request".to_owned()),
+            )
+        }
+    };
+
+    let contract = match parse_contract_yaml(&request.contract_yaml) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return analyze_bad_request(
+                "RequestError",
+                "ParseError",
+                format!("{}: {}", err.path, err.message),
+                Some(err.path),
+            )
+        }
+    };
+
+    let validation = type_check(&contract, &TypeCheckContext::default());
+    if !validation.errors.is_empty()
+        || !validation.holes.is_empty()
+        || !validation.params.is_empty()
+    {
+        return analyze_bad_request(
+            "ValidationError",
+            "NotReadyToRun",
+            "contract must be fully instantiated and type-safe before analysis".to_owned(),
+            Some("$.contract_yaml".to_owned()),
+        );
+    }
+
+    let (property_name, result) = match run_counterexample_analysis(
+        &contract,
+        &request.property,
+        request.authorization_rule.as_ref(),
+        request.max_nodes,
+    ) {
+        Ok(value) => value,
+        Err((code, subcode, message, path)) => {
+            return analyze_bad_request(code, subcode, message, path)
+        }
+    };
+
+    match result {
+        CounterexampleResult::PassBounded { checked_nodes } => (
+            StatusCode::OK,
+            Json(AnalyzeCounterexampleResponse {
+                result: "success",
+                success: Some(analysis_success_response(property_name, checked_nodes, None)),
+                error: None,
+            }),
+        ),
+        CounterexampleResult::CounterexampleFound {
+            checked_nodes,
+            counterexample,
+        } => (
+            StatusCode::OK,
+            Json(AnalyzeCounterexampleResponse {
+                result: "success",
+                success: Some(analysis_success_response(
+                    counterexample.property,
+                    checked_nodes,
+                    Some(counterexample),
+                )),
+                error: None,
+            }),
+        ),
+        CounterexampleResult::Unsupported {
+            checked_nodes,
+            path,
+            reason,
+        } => analyze_bad_request(
+            "AnalysisError",
+            "UnsupportedContractForProperty",
+            format!("{reason} (checked_nodes={checked_nodes})"),
+            Some(path),
+        ),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/analyze/apply-repair",
+    tag = "simulation",
+    request_body = AnalyzeApplyRepairRequest,
+    responses(
+        (status = 200, description = "Repair workflow completed", body = AnalyzeApplyRepairResponse),
+        (status = 400, description = "Repair workflow rejected", body = AnalyzeApplyRepairResponse),
+        (status = 500, description = "Internal server error", body = AnalyzeApplyRepairResponse)
+    )
+)]
+pub async fn analyze_apply_repair_handler(
+    _state: State<AppState>,
+    request: Result<Json<AnalyzeApplyRepairRequest>, JsonRejection>,
+) -> (StatusCode, Json<AnalyzeApplyRepairResponse>) {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            return analyze_apply_repair_bad_request(
+                "RequestError",
+                "InvalidJson",
+                err.body_text(),
+                Some("$.request".to_owned()),
+            )
+        }
+    };
+
+    let contract = match parse_contract_yaml(&request.contract_yaml) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return analyze_apply_repair_bad_request(
+                "RequestError",
+                "ParseError",
+                format!("{}: {}", err.path, err.message),
+                Some(err.path),
+            )
+        }
+    };
+    let validation = type_check(&contract, &TypeCheckContext::default());
+    if !validation.errors.is_empty()
+        || !validation.holes.is_empty()
+        || !validation.params.is_empty()
+    {
+        return analyze_apply_repair_bad_request(
+            "ValidationError",
+            "NotReadyToRun",
+            "contract must be fully instantiated and type-safe before analysis".to_owned(),
+            Some("$.contract_yaml".to_owned()),
+        );
+    }
+
+    let (property_name, before_result) = match run_counterexample_analysis(
+        &contract,
+        &request.property,
+        request.authorization_rule.as_ref(),
+        request.max_nodes,
+    ) {
+        Ok(value) => value,
+        Err((code, subcode, message, path)) => {
+            return analyze_apply_repair_bad_request(code, subcode, message, path)
+        }
+    };
+
+    let (before_success, maybe_patch) = match before_result {
+        CounterexampleResult::PassBounded { checked_nodes } => (
+            analysis_success_response(property_name, checked_nodes, None),
+            None,
+        ),
+        CounterexampleResult::CounterexampleFound {
+            checked_nodes,
+            counterexample,
+        } => {
+            let patch = counterexample.auto_repair_patch.clone();
+            (
+                analysis_success_response(counterexample.property, checked_nodes, Some(counterexample)),
+                patch,
+            )
+        }
+        CounterexampleResult::Unsupported {
+            checked_nodes,
+            path,
+            reason,
+        } => {
+            return analyze_apply_repair_bad_request(
+                "AnalysisError",
+                "UnsupportedContractForProperty",
+                format!("{reason} (checked_nodes={checked_nodes})"),
+                Some(path),
+            )
+        }
+    };
+
+    let Some(patch) = maybe_patch else {
+        return (
+            StatusCode::OK,
+            Json(AnalyzeApplyRepairResponse {
+                result: "success",
+                success: Some(AnalyzeApplyRepairSuccessResponse {
+                    property: property_name,
+                    repaired: false,
+                    before: before_success,
+                    after: None,
+                    patched_contract_yaml: None,
+                }),
+                error: None,
+            }),
+        );
+    };
+
+    let patched_contract = match apply_auto_repair_patch(&contract, &patch) {
+        Ok(contract) => contract,
+        Err(err) => {
+            return analyze_apply_repair_bad_request(
+                "RepairError",
+                "PatchApplyFailed",
+                err,
+                Some("$.counterexample.auto_repair_patch.path".to_owned()),
+            )
+        }
+    };
+    let patched_contract_yaml = match contract_to_yaml_string(&patched_contract) {
+        Ok(yaml) => yaml,
+        Err(err) => {
+            return analyze_apply_repair_internal_error(format!(
+                "failed to serialize patched contract: {err}"
+            ))
+        }
+    };
+
+    let (_, after_result) = match run_counterexample_analysis(
+        &patched_contract,
+        &request.property,
+        request.authorization_rule.as_ref(),
+        request.max_nodes,
+    ) {
+        Ok(value) => value,
+        Err((code, subcode, message, path)) => {
+            return analyze_apply_repair_bad_request(code, subcode, message, path)
+        }
+    };
+    let after_success = match after_result {
+        CounterexampleResult::PassBounded { checked_nodes } => {
+            analysis_success_response(property_name, checked_nodes, None)
+        }
+        CounterexampleResult::CounterexampleFound {
+            checked_nodes,
+            counterexample,
+        } => analysis_success_response(counterexample.property, checked_nodes, Some(counterexample)),
+        CounterexampleResult::Unsupported {
+            checked_nodes,
+            path,
+            reason,
+        } => {
+            return analyze_apply_repair_bad_request(
+                "AnalysisError",
+                "UnsupportedContractForProperty",
+                format!("{reason} (checked_nodes={checked_nodes})"),
+                Some(path),
+            )
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(AnalyzeApplyRepairResponse {
+            result: "success",
+            success: Some(AnalyzeApplyRepairSuccessResponse {
+                property: property_name,
+                repaired: true,
+                before: before_success,
+                after: Some(after_success),
+                patched_contract_yaml: Some(patched_contract_yaml),
+            }),
+            error: None,
+        }),
+    )
 }
 
 #[utoipa::path(
@@ -1792,6 +2220,166 @@ fn typecheck_explain_bad_request(
                 message,
                 path,
                 diagnostics,
+            }),
+        }),
+    )
+}
+
+fn run_counterexample_analysis(
+    contract: &crate::ast::Contract,
+    property: &AnalyzePropertyRequest,
+    authorization_rule: Option<&AuthorizationRuleRequest>,
+    max_nodes: usize,
+) -> Result<(&'static str, CounterexampleResult), (&'static str, &'static str, String, Option<String>)> {
+    match property {
+        AnalyzePropertyRequest::DeadlineSafety => Ok((
+            "deadline_safety",
+            analyze_deadline_safety(contract, &CounterexampleRequest { max_nodes }),
+        )),
+        AnalyzePropertyRequest::AuthorizationSafety => {
+            let Some(rule) = authorization_rule else {
+                return Err((
+                    "RequestError",
+                    "MissingAuthorizationRule",
+                    "authorization_safety requires an authorization_rule".to_owned(),
+                    Some("$.authorization_rule".to_owned()),
+                ));
+            };
+            if rule.allowed_parties.is_empty() {
+                return Err((
+                    "RequestError",
+                    "InvalidAuthorizationRule",
+                    "authorization_rule.allowed_parties must not be empty".to_owned(),
+                    Some("$.authorization_rule.allowed_parties".to_owned()),
+                ));
+            }
+            let action = match rule.action {
+                AuthorizationActionRequest::Deposit => AuthorizationAction::Deposit,
+                AuthorizationActionRequest::Choice => AuthorizationAction::Choice,
+            };
+            let mapped_rule = AuthorizationRule {
+                action,
+                target: rule.target.clone(),
+                allowed_parties: rule.allowed_parties.clone(),
+            };
+            Ok((
+                "authorization_safety",
+                analyze_authorization_safety(contract, &CounterexampleRequest { max_nodes }, &mapped_rule),
+            ))
+        }
+    }
+}
+
+fn analysis_success_response(
+    property: &'static str,
+    checked_nodes: usize,
+    counterexample: Option<Counterexample>,
+) -> AnalyzeCounterexampleSuccessResponse {
+    AnalyzeCounterexampleSuccessResponse {
+        property,
+        status: if counterexample.is_some() {
+            "counterexample_found"
+        } else {
+            "pass_bounded"
+        },
+        checked_nodes,
+        counterexample: counterexample.map(counterexample_to_response),
+    }
+}
+
+fn counterexample_to_response(counterexample: Counterexample) -> AnalyzeCounterexampleWitnessResponse {
+    AnalyzeCounterexampleWitnessResponse {
+        violating_path: counterexample.violating_path,
+        explanation: counterexample.explanation,
+        steps: counterexample
+            .steps
+            .into_iter()
+            .map(|step| AnalyzeCounterexampleStepResponse {
+                id: step.id,
+                index: step.index,
+                kind: step.kind.to_owned(),
+                severity: step.severity.to_owned(),
+                path: step.path,
+                actor: step.actor,
+                time: step.time.map(|value| value.to_string()),
+                detail: step.detail,
+                suggested_fix: step.suggested_fix,
+            })
+            .collect(),
+        auto_repair_patch: counterexample.auto_repair_patch.map(|patch| {
+            AnalyzeAutoRepairPatchResponse {
+                kind: patch.kind.to_owned(),
+                path: patch.path,
+                value: patch.value,
+                rationale: patch.rationale,
+            }
+        }),
+        timeout: counterexample.timeout.map(|v| v.to_string()),
+        witness_time: counterexample.witness_time.map(|v| v.to_string()),
+        offending_party: counterexample.offending_party,
+        action: counterexample.action.map(str::to_owned),
+        target: counterexample.target,
+    }
+}
+
+fn analyze_bad_request(
+    code: &str,
+    subcode: &str,
+    message: String,
+    path: Option<String>,
+) -> (StatusCode, Json<AnalyzeCounterexampleResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(AnalyzeCounterexampleResponse {
+            result: "error",
+            success: None,
+            error: Some(SimulateErrorResponse {
+                code: code.to_owned(),
+                subcode: subcode.to_owned(),
+                message,
+                path,
+                diagnostics: None,
+            }),
+        }),
+    )
+}
+
+fn analyze_apply_repair_bad_request(
+    code: &str,
+    subcode: &str,
+    message: String,
+    path: Option<String>,
+) -> (StatusCode, Json<AnalyzeApplyRepairResponse>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(AnalyzeApplyRepairResponse {
+            result: "error",
+            success: None,
+            error: Some(SimulateErrorResponse {
+                code: code.to_owned(),
+                subcode: subcode.to_owned(),
+                message,
+                path,
+                diagnostics: None,
+            }),
+        }),
+    )
+}
+
+fn analyze_apply_repair_internal_error(
+    message: String,
+) -> (StatusCode, Json<AnalyzeApplyRepairResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(AnalyzeApplyRepairResponse {
+            result: "error",
+            success: None,
+            error: Some(SimulateErrorResponse {
+                code: "InternalError".to_owned(),
+                subcode: "InternalError".to_owned(),
+                message,
+                path: None,
+                diagnostics: None,
             }),
         }),
     )

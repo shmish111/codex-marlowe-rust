@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { simulateContract, simulateStep, simulateTimeoutStep, validateContract } from './client';
+import {
+  analyzeContract,
+  applyDeterministicRepair,
+  simulateContract,
+  simulateStep,
+  simulateTimeoutStep,
+  validateContract
+} from './client';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -256,6 +263,172 @@ describe('api client', () => {
               }
             }
           ]
+        }
+      })
+    });
+  });
+
+  it('maps counterexample analysis response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'success',
+        success: {
+          property: 'deadline_safety',
+          status: 'counterexample_found',
+          checked_nodes: 4,
+          counterexample: {
+            violating_path: '$.When',
+            explanation: 'Timeout continuation is not Close.',
+            steps: [
+              {
+                id: 'deadline_safety.step.0',
+                index: 0,
+                kind: 'timeout_reached',
+                severity: 'info',
+                path: '$.transaction.interval_end',
+                detail: 'Reached timeout',
+                suggested_fix: 'Review timeout branch'
+              }
+            ],
+            auto_repair_patch: {
+              kind: 'set_contract',
+              path: '$.When.timeout_continuation',
+              value: '{ Close: {} }',
+              rationale: 'Close on timeout'
+            }
+          }
+        }
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await analyzeContract('contract-code');
+    expect(result.status).toBe('counterexample_found');
+    expect(result.counterexample?.steps[0]?.id).toBe('deadline_safety.step.0');
+    expect(result.counterexample?.autoRepairPatch?.kind).toBe('set_contract');
+    expect(fetchMock).toHaveBeenCalledWith('/api/analyze/counterexample', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'contract-code',
+        property: 'deadline_safety'
+      })
+    });
+  });
+
+  it('maps apply repair response with patched yaml', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'success',
+        success: {
+          property: 'deadline_safety',
+          repaired: true,
+          before: {
+            property: 'deadline_safety',
+            status: 'counterexample_found',
+            checked_nodes: 4
+          },
+          after: {
+            property: 'deadline_safety',
+            status: 'pass_bounded',
+            checked_nodes: 4
+          },
+          patched_contract_yaml: 'When:\\n  timeout_continuation: { Close: {} }'
+        }
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await applyDeterministicRepair('contract-code');
+    expect(result.repaired).toBe(true);
+    expect(result.after?.status).toBe('pass_bounded');
+    expect(result.patchedContractYaml).toContain('Close');
+    expect(fetchMock).toHaveBeenCalledWith('/api/analyze/apply-repair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'contract-code',
+        property: 'deadline_safety'
+      })
+    });
+  });
+
+  it('sends authorization_safety rule in analyze payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'success',
+        success: {
+          property: 'authorization_safety',
+          status: 'pass_bounded',
+          checked_nodes: 10
+        }
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await analyzeContract('contract-code', {
+      property: 'authorization_safety',
+      authorizationRule: {
+        action: 'choice',
+        target: 'release_funds',
+        allowedParties: [{ Role: 'alice' }]
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/analyze/counterexample', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'contract-code',
+        property: 'authorization_safety',
+        authorization_rule: {
+          action: 'choice',
+          target: 'release_funds',
+          allowed_parties: [{ Role: 'alice' }]
+        }
+      })
+    });
+  });
+
+  it('sends authorization_safety rule in apply repair payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: 'success',
+        success: {
+          property: 'authorization_safety',
+          repaired: false,
+          before: {
+            property: 'authorization_safety',
+            status: 'pass_bounded',
+            checked_nodes: 10
+          }
+        }
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await applyDeterministicRepair('contract-code', {
+      property: 'authorization_safety',
+      authorizationRule: {
+        action: 'deposit',
+        allowedParties: [{ Role: 'alice' }, { Role: 'bob' }]
+      }
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/analyze/apply-repair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contract_yaml: 'contract-code',
+        property: 'authorization_safety',
+        authorization_rule: {
+          action: 'deposit',
+          target: undefined,
+          allowed_parties: [{ Role: 'alice' }, { Role: 'bob' }]
         }
       })
     });

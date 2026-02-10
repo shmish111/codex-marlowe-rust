@@ -6,6 +6,7 @@
 //! - A type checker with inference for holes/params and context-based definition checks.
 
 pub mod ast;
+pub mod analyze;
 pub mod http;
 pub mod parser;
 pub mod serializer;

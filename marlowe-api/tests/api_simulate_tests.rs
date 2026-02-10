@@ -50,9 +50,296 @@ async fn openapi_endpoint_returns_spec() {
     let status = response.status();
     let json = json_response(response).await;
     assert_eq!(status, StatusCode::OK);
+    assert!(json["paths"]["/analyze/counterexample"].is_object());
+    assert!(json["paths"]["/analyze/apply-repair"].is_object());
     assert!(json["paths"]["/simulate/step"].is_object());
     assert!(json["paths"]["/simulate/preview"].is_object());
     assert!(json["paths"]["/typecheck/explain"].is_object());
+}
+
+#[tokio::test]
+async fn analyze_counterexample_finds_deadline_violation() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases: []
+  timeout: { Timeout: 10 }
+  timeout_continuation:
+    Pay:
+      from: { Role: "alice" }
+      to_party: { Role: "bob" }
+      token: { Token: { currency_symbol: "", token_name: "" } }
+      amount: { Constant: 1 }
+      then: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "property": "deadline_safety",
+      "max_nodes": 128
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/analyze/counterexample")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["status"], "counterexample_found");
+    assert_eq!(json["success"]["property"], "deadline_safety");
+    assert_eq!(json["success"]["counterexample"]["timeout"], "10");
+    assert_eq!(json["success"]["counterexample"]["witness_time"], "10");
+    assert_eq!(
+        json["success"]["counterexample"]["steps"][0]["id"],
+        "deadline_safety.step.0"
+    );
+    assert_eq!(json["success"]["counterexample"]["steps"][0]["kind"], "timeout_reached");
+    assert_eq!(json["success"]["counterexample"]["steps"][0]["severity"], "info");
+    assert!(
+        json["success"]["counterexample"]["steps"][0]["suggested_fix"]
+            .as_str()
+            .unwrap()
+            .len()
+            > 5
+    );
+    assert_eq!(
+        json["success"]["counterexample"]["steps"][1]["kind"],
+        "non_close_timeout_continuation"
+    );
+    assert_eq!(json["success"]["counterexample"]["steps"][1]["severity"], "high");
+    assert_eq!(
+        json["success"]["counterexample"]["auto_repair_patch"]["kind"],
+        "set_contract"
+    );
+    assert_eq!(
+        json["success"]["counterexample"]["auto_repair_patch"]["value"],
+        "{ Close: {} }"
+    );
+}
+
+#[tokio::test]
+async fn analyze_counterexample_passes_close_on_timeout() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases: []
+  timeout: { Timeout: 10 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "property": "deadline_safety"
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/analyze/counterexample")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["status"], "pass_bounded");
+    assert!(json["success"]["counterexample"].is_null());
+}
+
+#[tokio::test]
+async fn analyze_counterexample_finds_authorization_violation() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases:
+    - Case:
+        action:
+          Choice:
+            id: { ChoiceId: { name: "release", party: { Role: "eve" } } }
+            bounds: [ { Bound: { from: { Constant: 0 }, to: { Constant: 1 } } } ]
+        then: { Close: {} }
+  timeout: { Timeout: 10 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "property": "authorization_safety",
+      "authorization_rule": {
+        "action": "choice",
+        "target": "release",
+        "allowed_parties": [{"Role": "alice"}]
+      }
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/analyze/counterexample")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["status"], "counterexample_found");
+    assert_eq!(json["success"]["property"], "authorization_safety");
+    assert_eq!(json["success"]["counterexample"]["action"], "choice");
+    assert_eq!(json["success"]["counterexample"]["offending_party"]["Role"], "eve");
+    assert_eq!(json["success"]["counterexample"]["target"], "release");
+    assert_eq!(
+        json["success"]["counterexample"]["steps"][0]["id"],
+        "authorization_safety.step.0"
+    );
+    assert_eq!(
+        json["success"]["counterexample"]["steps"][0]["kind"],
+        "unauthorized_action"
+    );
+    assert_eq!(
+        json["success"]["counterexample"]["steps"][0]["severity"],
+        "high"
+    );
+    assert!(
+        json["success"]["counterexample"]["steps"][0]["suggested_fix"]
+            .as_str()
+            .unwrap()
+            .contains("allowed")
+    );
+    assert_eq!(
+        json["success"]["counterexample"]["auto_repair_patch"]["kind"],
+        "replace_party"
+    );
+    assert!(
+        json["success"]["counterexample"]["auto_repair_patch"]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with(".Choice.id.party")
+    );
+}
+
+#[tokio::test]
+async fn analyze_counterexample_rejects_missing_authorization_rule() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases: []
+  timeout: { Timeout: 10 }
+  timeout_continuation: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "property": "authorization_safety"
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/analyze/counterexample")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = json_response(response).await;
+    assert_eq!(json["error"]["subcode"], "MissingAuthorizationRule");
+}
+
+#[tokio::test]
+async fn analyze_apply_repair_fixes_deadline_safety_violation() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases: []
+  timeout: { Timeout: 10 }
+  timeout_continuation:
+    Pay:
+      from: { Role: "alice" }
+      to_party: { Role: "bob" }
+      token: { Token: { currency_symbol: "", token_name: "" } }
+      amount: { Constant: 1 }
+      then: { Close: {} }
+"#;
+
+    let request_body = json!({
+      "contract_yaml": contract,
+      "property": "deadline_safety",
+      "max_nodes": 128
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/analyze/apply-repair")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["result"], "success");
+    assert_eq!(json["success"]["repaired"], true);
+    assert_eq!(json["success"]["before"]["status"], "counterexample_found");
+    assert_eq!(json["success"]["after"]["status"], "pass_bounded");
+    let patched = json["success"]["patched_contract_yaml"]
+        .as_str()
+        .unwrap();
+    assert!(patched.contains("timeout_continuation:"));
+    assert!(patched.contains("Close: {}"));
+}
+
+#[tokio::test]
+async fn analyze_apply_repair_reports_noop_when_already_safe() {
+    let app = build_router();
+    let contract = r#"
+When:
+  cases: []
+  timeout: { Timeout: 10 }
+  timeout_continuation: { Close: {} }
+"#;
+    let request_body = json!({
+      "contract_yaml": contract,
+      "property": "deadline_safety"
+    });
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/analyze/apply-repair")
+                .method("POST")
+                .header("content-type", "application/json")
+                .body(Body::from(request_body.to_string()))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = json_response(response).await;
+    assert_eq!(json["success"]["repaired"], false);
+    assert!(json["success"]["after"].is_null());
+    assert!(json["success"]["patched_contract_yaml"].is_null());
 }
 
 #[tokio::test]

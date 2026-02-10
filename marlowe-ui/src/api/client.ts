@@ -107,6 +107,65 @@ export type SimulationSourceSpan = {
   endColumn?: number;
 };
 
+export type AnalysisStep = {
+  id: string;
+  index: number;
+  kind: string;
+  severity: string;
+  path: string;
+  actor?: Record<string, unknown>;
+  time?: string;
+  detail: string;
+  suggestedFix: string;
+};
+
+export type AnalysisAutoRepairPatch = {
+  kind: string;
+  path: string;
+  value: string;
+  rationale: string;
+};
+
+export type AnalysisCounterexample = {
+  violatingPath: string;
+  explanation: string;
+  steps: AnalysisStep[];
+  autoRepairPatch?: AnalysisAutoRepairPatch;
+  timeout?: string;
+  witnessTime?: string;
+  offendingParty?: Record<string, unknown>;
+  action?: string;
+  target?: string;
+};
+
+export type AnalysisResult = {
+  property: AnalysisProperty;
+  status: 'pass_bounded' | 'counterexample_found';
+  checkedNodes: number;
+  counterexample?: AnalysisCounterexample;
+};
+
+export type AnalysisProperty = 'deadline_safety' | 'authorization_safety';
+
+export type AuthorizationRuleInput = {
+  action: 'deposit' | 'choice';
+  target?: string;
+  allowedParties: Record<string, unknown>[];
+};
+
+export type AnalysisRequestOptions = {
+  property: AnalysisProperty;
+  authorizationRule?: AuthorizationRuleInput;
+};
+
+export type ApplyRepairResult = {
+  property: string;
+  repaired: boolean;
+  before: AnalysisResult;
+  after?: AnalysisResult;
+  patchedContractYaml?: string;
+};
+
 type ApiDiagnostic = {
   code?: string;
   subcode?: string;
@@ -259,6 +318,72 @@ type ApiTypecheckExplainResponse = {
     message: string;
   } | null;
   success?: ApiTypecheckExplainSuccess | null;
+};
+
+type ApiAnalyzeStep = {
+  id: string;
+  index: number;
+  kind: string;
+  severity: string;
+  path: string;
+  actor?: Record<string, unknown> | null;
+  time?: string | null;
+  detail: string;
+  suggested_fix: string;
+};
+
+type ApiAnalyzeAutoRepairPatch = {
+  kind: string;
+  path: string;
+  value: string;
+  rationale: string;
+};
+
+type ApiAnalyzeCounterexample = {
+  violating_path: string;
+  explanation: string;
+  steps: ApiAnalyzeStep[];
+  auto_repair_patch?: ApiAnalyzeAutoRepairPatch | null;
+  timeout?: string | null;
+  witness_time?: string | null;
+  offending_party?: Record<string, unknown> | null;
+  action?: string | null;
+  target?: string | null;
+};
+
+type ApiAnalyzeSuccess = {
+  property: string;
+  status: 'pass_bounded' | 'counterexample_found';
+  checked_nodes: number;
+  counterexample?: ApiAnalyzeCounterexample | null;
+};
+
+type ApiAnalyzeCounterexampleResponse = {
+  result: string;
+  error?: {
+    code?: string;
+    subcode?: string;
+    message: string;
+  } | null;
+  success?: ApiAnalyzeSuccess | null;
+};
+
+type ApiAnalyzeApplyRepairSuccess = {
+  property: string;
+  repaired: boolean;
+  before: ApiAnalyzeSuccess;
+  after?: ApiAnalyzeSuccess | null;
+  patched_contract_yaml?: string | null;
+};
+
+type ApiAnalyzeApplyRepairResponse = {
+  result: string;
+  error?: {
+    code?: string;
+    subcode?: string;
+    message: string;
+  } | null;
+  success?: ApiAnalyzeApplyRepairSuccess | null;
 };
 
 const JSON_HEADERS = {
@@ -511,6 +636,48 @@ function getMinTime(state: Record<string, unknown> | null | undefined): string {
   return '0';
 }
 
+function mapAnalyzeCounterexample(counterexample: ApiAnalyzeCounterexample): AnalysisCounterexample {
+  return {
+    violatingPath: counterexample.violating_path,
+    explanation: counterexample.explanation,
+    steps: (counterexample.steps ?? []).map((step) => ({
+      id: step.id,
+      index: step.index,
+      kind: step.kind,
+      severity: step.severity,
+      path: step.path,
+      actor: step.actor ?? undefined,
+      time: step.time ?? undefined,
+      detail: step.detail,
+      suggestedFix: step.suggested_fix
+    })),
+    autoRepairPatch: counterexample.auto_repair_patch
+      ? {
+          kind: counterexample.auto_repair_patch.kind,
+          path: counterexample.auto_repair_patch.path,
+          value: counterexample.auto_repair_patch.value,
+          rationale: counterexample.auto_repair_patch.rationale
+        }
+      : undefined,
+    timeout: counterexample.timeout ?? undefined,
+    witnessTime: counterexample.witness_time ?? undefined,
+    offendingParty: counterexample.offending_party ?? undefined,
+    action: counterexample.action ?? undefined,
+    target: counterexample.target ?? undefined
+  };
+}
+
+function mapAnalyzeSuccess(success: ApiAnalyzeSuccess): AnalysisResult {
+  return {
+    property: success.property as AnalysisProperty,
+    status: success.status,
+    checkedNodes: success.checked_nodes,
+    counterexample: success.counterexample
+      ? mapAnalyzeCounterexample(success.counterexample)
+      : undefined
+  };
+}
+
 export async function validateContract(code: string): Promise<ValidationResponse> {
   const [previewResponse, explainResponse] = await Promise.all([
     requestJson<ApiSimulatePreviewResponse>('/api/simulate/preview', {
@@ -700,5 +867,69 @@ export async function simulateTimeoutStep(
       state: nextState,
       minTime: getMinTime(nextState)
     }
+  };
+}
+
+export async function analyzeContract(
+  contractYaml: string,
+  options: AnalysisRequestOptions = { property: 'deadline_safety' }
+): Promise<AnalysisResult> {
+  const payload: Record<string, unknown> = {
+    contract_yaml: contractYaml,
+    property: options.property
+  };
+  if (options.authorizationRule) {
+    payload.authorization_rule = {
+      action: options.authorizationRule.action,
+      target: options.authorizationRule.target,
+      allowed_parties: options.authorizationRule.allowedParties
+    };
+  }
+  const response = await requestJson<ApiAnalyzeCounterexampleResponse>('/api/analyze/counterexample', {
+    ...payload
+  });
+
+  if (response.data?.error) {
+    throw new Error(response.data.error.message);
+  }
+  if (!response.ok || !response.data?.success) {
+    throw statusError(response.status);
+  }
+
+  return mapAnalyzeSuccess(response.data.success);
+}
+
+export async function applyDeterministicRepair(
+  contractYaml: string,
+  options: AnalysisRequestOptions = { property: 'deadline_safety' }
+): Promise<ApplyRepairResult> {
+  const payload: Record<string, unknown> = {
+    contract_yaml: contractYaml,
+    property: options.property
+  };
+  if (options.authorizationRule) {
+    payload.authorization_rule = {
+      action: options.authorizationRule.action,
+      target: options.authorizationRule.target,
+      allowed_parties: options.authorizationRule.allowedParties
+    };
+  }
+  const response = await requestJson<ApiAnalyzeApplyRepairResponse>('/api/analyze/apply-repair', {
+    ...payload
+  });
+
+  if (response.data?.error) {
+    throw new Error(response.data.error.message);
+  }
+  if (!response.ok || !response.data?.success) {
+    throw statusError(response.status);
+  }
+
+  return {
+    property: response.data.success.property,
+    repaired: response.data.success.repaired,
+    before: mapAnalyzeSuccess(response.data.success.before),
+    after: response.data.success.after ? mapAnalyzeSuccess(response.data.success.after) : undefined,
+    patchedContractYaml: response.data.success.patched_contract_yaml ?? undefined
   };
 }
